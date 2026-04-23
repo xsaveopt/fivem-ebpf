@@ -1,0 +1,10 @@
+bin/
+bpf/vmlinux.h
+internal/loader/fivem*_bpfel*.go
+internal/loader/fivem*_bpfel*.o
+.vagrant/
+*.log
+*.tcpdump
+*.pcap
+*.zst
+dist/

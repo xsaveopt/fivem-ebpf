@@ -1,0 +1,72 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: install clang/llvm/libbpf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev \
+            linux-headers-$(uname -r)
+
+      - name: install bpftool
+        # Apt's bpftool is the linux-tools-common wrapper that dispatches to
+        # /usr/lib/linux-tools/<KVER>/bpftool. On hosted runners the kernel
+        # is azure-flavored and the matching linux-tools-<KVER>-azure
+        # package lags the kernel by weeks — the wrapper then errors with
+        # "bpftool not found for kernel <KVER>". Use the upstream static
+        # binary instead, pinned by SHA-256.
+        run: |
+          BPFTOOL_VERSION=v7.7.0
+          BPFTOOL_SHA256=09150596f09356b0ff632dd7f9856e0ea86bf96b269e9bc94278d9a9432a268c
+          curl -sfL -o /tmp/bpftool.tar.gz \
+            "https://github.com/libbpf/bpftool/releases/download/${BPFTOOL_VERSION}/bpftool-${BPFTOOL_VERSION}-amd64.tar.gz"
+          echo "${BPFTOOL_SHA256}  /tmp/bpftool.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/bpftool.tar.gz -C /usr/local/bin bpftool
+          sudo chmod 0755 /usr/local/bin/bpftool
+          bpftool version
+
+      - name: generate vmlinux.h
+        run: scripts/gen-vmlinux.sh
+
+      - name: go generate
+        run: go generate ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_SHA::7}" \
+            -o bin/fivem-ebpf \
+            ./cmd/fivem-ebpf
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fivem-ebpf-linux-${{ matrix.goarch }}
+          path: bin/fivem-ebpf
+          retention-days: 7

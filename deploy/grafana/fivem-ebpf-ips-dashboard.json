@@ -1,0 +1,237 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_INFINITY",
+      "label": "Infinity",
+      "description": "Infinity datasource pointing at your fivem-ebpf metrics URL (e.g. http://server:9464). Plugin: yesoreyeram-infinity-datasource.",
+      "type": "datasource",
+      "pluginId": "yesoreyeram-infinity-datasource",
+      "pluginName": "Infinity"
+    }
+  ],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "yesoreyeram-infinity-datasource", "name": "Infinity", "version": "2.0.0"},
+    {"type": "panel", "id": "table", "name": "Table", "version": ""}
+  ],
+  "annotations": {"list": []},
+  "description": "Per-IP listings: who's whitelisted, who's blacklisted, who's holding open TCP. Live snapshots over the daemon's /api/* endpoints. Requires the Infinity datasource (yesoreyeram-infinity-datasource).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Whitelist (tcp_whitelist)",
+      "description": "IPs currently allowed to send UDP to FiveM. Promoted by a successful POST /client + CitizenFX/1 over an established TCP connection. Re-evaluated against TTL on every UDP packet — listing is current as of this query.",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 12},
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/whitelist",
+          "url_options": {"method": "GET", "data": ""},
+          "root_selector": "",
+          "columns": [
+            {"selector": "ip", "text": "IP", "type": "string"},
+            {"selector": "age_seconds", "text": "Age (s)", "type": "number"}
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "left", "displayMode": "auto", "filterable": true}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Age (s)"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "custom.align", "value": "right"}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Age (s)", "desc": false}]
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Blacklist (udp_health where blacklist_until_ns > now)",
+      "description": "IPs currently dropped on the UDP path due to repeated ENet-malformed packets. Anomalies = events in the current health window; remaining = how long until the auto-unblock fires. Use `fivem-ebpf clear --map health --ip <addr>` to unblock early.",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 12},
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/blacklist",
+          "url_options": {"method": "GET", "data": ""},
+          "root_selector": "",
+          "columns": [
+            {"selector": "ip", "text": "IP", "type": "string"},
+            {"selector": "anomalies", "text": "Anomalies", "type": "number"},
+            {"selector": "window_age_seconds", "text": "Window age (s)", "type": "number"},
+            {"selector": "blacklist_remaining_seconds", "text": "Unblock in (s)", "type": "number"}
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "left", "displayMode": "auto", "filterable": true},
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Anomalies"},
+            "properties": [{"id": "custom.align", "value": "right"}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Window age (s)"},
+            "properties": [{"id": "unit", "value": "s"}, {"id": "custom.align", "value": "right"}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Unblock in (s)"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "custom.align", "value": "right"},
+              {"id": "custom.cellOptions", "value": {"type": "color-text"}},
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"color": "yellow", "value": null},
+                    {"color": "orange", "value": 60},
+                    {"color": "red", "value": 240}
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Unblock in (s)", "desc": true}]
+      }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Open TCP sockets (tcp_open_count)",
+      "description": "Per-IP count of currently-held TCP sockets to FiveM. Updated by sockops on PASSIVE_ESTABLISHED / STATE_CB→TCP_CLOSE. An IP at the cap (`--tcp-max-open-per-ip`) gets new SYNs dropped — useful for spotting connection-hold attackers.",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 10},
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/open-count",
+          "url_options": {"method": "GET", "data": ""},
+          "root_selector": "",
+          "columns": [
+            {"selector": "ip", "text": "IP", "type": "string"},
+            {"selector": "count", "text": "Open sockets", "type": "number"}
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "left", "displayMode": "auto", "filterable": true}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Open sockets"},
+            "properties": [{"id": "custom.align", "value": "right"}]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Open sockets", "desc": true}]
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Established (tcp_established) — completed 3WHS, not yet whitelisted",
+      "description": "IPs that completed the TCP 3-way handshake on :30120. They've passed sockops but haven't yet promoted to tcp_whitelist (which requires a CitizenFX/1 POST /client). A large gap between this list and the whitelist suggests scanners doing 3WHS without the FiveM L7 handshake.",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 10},
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "${DS_INFINITY}"},
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/established",
+          "url_options": {"method": "GET", "data": ""},
+          "root_selector": "",
+          "columns": [
+            {"selector": "ip", "text": "IP", "type": "string"},
+            {"selector": "age_seconds", "text": "Age (s)", "type": "number"}
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "left", "displayMode": "auto", "filterable": true}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Age (s)"},
+            "properties": [{"id": "unit", "value": "s"}, {"id": "custom.align", "value": "right"}]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Age (s)", "desc": false}]
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["fivem", "ebpf", "ddos", "ips"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "fivem-ebpf — IP listings",
+  "uid": "fivem-ebpf-ips",
+  "version": 1,
+  "weekStart": ""
+}
