@@ -120,15 +120,41 @@ func cmdRun(args []string) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
-	registerAPI(mux, l)
+	registerAPI(mux, apiCfg{
+		Loaded:  l,
+		Version: version,
+		Iface:   *iface,
+		Port:    uint16(*port),
+		PinPath: *pinPath,
+		Limits: apiLimits{
+			UDPRatePerSec:     *udpRate,
+			UDPBurst:          *udpBurst,
+			InitConnectPerMin: *initRate,
+			InitConnectBurst:  *initBurst,
+			GetInfoPerMin:     *getRate,
+			GetInfoBurst:      *getBurst,
+			TCPGlobalPerSec:   *tcpGlobalRate,
+			TCPGlobalBurst:    *tcpGlobalBurst,
+			TCPMaxOpenPerIP:   *tcpMaxOpenPerIP,
+			WhitelistTTL:      *ttl,
+			HealthWindow:      *healthWindow,
+			HealthThreshold:   uint32(*healthThreshold),
+			HealthBlacklist:   *healthBlacklist,
+		},
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("fivem-ebpf " + version + "\n" +
 			"  /metrics                     prometheus counters\n" +
-			"  /api/whitelist               IPs in tcp_whitelist (JSON)\n" +
-			"  /api/blacklist               IPs currently UDP-blacklisted (JSON)\n" +
-			"  /api/established             IPs in tcp_established (JSON)\n" +
-			"  /api/syn-seen                IPs in tcp_syn_seen (JSON)\n" +
-			"  /api/open-count              open TCP socket count per IP (JSON)\n" +
+			"  /api/info                    daemon overview (limits + maps + counters)\n" +
+			"  /api/stats                   counter values (JSON)\n" +
+			"  /api/top?map=...&n=...       hottest IPs in a per-IP map\n" +
+			"  /api/health[?all=1]          blacklisted IPs (with ?all=1: all anomaly entries)\n" +
+			"  /api/whitelist               IPs in tcp_whitelist\n" +
+			"  /api/blacklist               IPs currently UDP-blacklisted\n" +
+			"  /api/established             IPs in tcp_established\n" +
+			"  /api/syn-seen                IPs in tcp_syn_seen\n" +
+			"  /api/open-count              open TCP socket count per IP\n" +
+			"  /api/ip/<addr>               aggregate state for one IPv4 across all maps\n" +
 			"  /api/state                   index of the above\n"))
 	})
 

@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
@@ -45,6 +48,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
 }
 
@@ -115,23 +119,312 @@ func handleBlacklist(m *ebpf.Map) http.HandlerFunc {
 	}
 }
 
+// handleIPLookup answers GET /api/ip/<addr> with everything the daemon
+// currently knows about that IPv4 across every per-IP map. Each field is
+// either an object (entry exists) or null (no entry). Used to debug
+// "why was this player kicked / why isn't this IP being whitelisted" —
+// type the IP, see its state at this instant.
+func handleIPLookup(l *loader.Loaded) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		addr := strings.TrimPrefix(r.URL.Path, "/api/ip/")
+		if addr == "" {
+			http.Error(w, "missing IP: GET /api/ip/<addr>", http.StatusBadRequest)
+			return
+		}
+		parsed := net.ParseIP(addr)
+		if parsed == nil {
+			http.Error(w, "invalid IP: "+addr, http.StatusBadRequest)
+			return
+		}
+		v4 := parsed.To4()
+		if v4 == nil {
+			http.Error(w, "IPv4 only: "+addr, http.StatusBadRequest)
+			return
+		}
+		var key [4]byte
+		copy(key[:], v4)
+
+		now := bootNS()
+		out := map[string]any{
+			"ip":                    addr,
+			"tcp_whitelist":         lookupTimestamp(l.TCPWhitelist, key, now),
+			"tcp_established":       lookupTimestamp(l.TCPEstablished, key, now),
+			"tcp_syn_seen":          lookupTimestamp(l.TCPSynSeen, key, now),
+			"tcp_open_count":        lookupCount(l.TCPOpenCount, key),
+			"udp_ratelimit":         lookupRatelimit(l.UDPRatelimit, key, now),
+			"initconnect_ratelimit": lookupRatelimit(l.InitConnectRatelimit, key, now),
+			"getinfo_ratelimit":     lookupRatelimit(l.GetInfoRatelimit, key, now),
+			"udp_health":            lookupHealth(l.UDPHealth, key, now),
+		}
+		writeJSON(w, out)
+	}
+}
+
+func lookupTimestamp(m *ebpf.Map, key [4]byte, now uint64) any {
+	if m == nil {
+		return nil
+	}
+	var val uint64
+	if err := m.Lookup(&key, &val); err != nil {
+		return nil
+	}
+	age := int64(now) - int64(val)
+	if age < 0 {
+		age = 0
+	}
+	return map[string]any{"age_seconds": age / 1_000_000_000}
+}
+
+func lookupCount(m *ebpf.Map, key [4]byte) any {
+	if m == nil {
+		return nil
+	}
+	var val uint64
+	if err := m.Lookup(&key, &val); err != nil {
+		return nil
+	}
+	return map[string]any{"count": val}
+}
+
+func lookupRatelimit(m *ebpf.Map, key [4]byte, now uint64) any {
+	if m == nil {
+		return nil
+	}
+	var val struct {
+		Tokens       uint64
+		LastRefillNS uint64
+	}
+	if err := m.Lookup(&key, &val); err != nil {
+		return nil
+	}
+	age := int64(now) - int64(val.LastRefillNS)
+	if age < 0 {
+		age = 0
+	}
+	return map[string]any{
+		"tokens":                  val.Tokens,
+		"last_refill_age_seconds": age / 1_000_000_000,
+	}
+}
+
+func lookupHealth(m *ebpf.Map, key [4]byte, now uint64) any {
+	if m == nil {
+		return nil
+	}
+	var val struct {
+		Anomalies        uint32
+		_                uint32
+		WindowStartNS    uint64
+		BlacklistUntilNS uint64
+	}
+	if err := m.Lookup(&key, &val); err != nil {
+		return nil
+	}
+	wAge := int64(now) - int64(val.WindowStartNS)
+	if wAge < 0 {
+		wAge = 0
+	}
+	out := map[string]any{
+		"anomalies":          val.Anomalies,
+		"window_age_seconds": wAge / 1_000_000_000,
+		"blacklisted":        val.BlacklistUntilNS > now,
+	}
+	if val.BlacklistUntilNS > now {
+		out["blacklist_remaining_seconds"] = int64(val.BlacklistUntilNS-now) / 1_000_000_000
+	}
+	return out
+}
+
+// apiCfg threads the daemon's runtime config into the API handlers so
+// /api/info can report what it's actually running with (vs reading the
+// startup log). Lives only in memory; nothing is pinned for it.
+type apiCfg struct {
+	Loaded  *loader.Loaded
+	Version string
+	Iface   string
+	Port    uint16
+	PinPath string
+	Limits  apiLimits
+}
+
+type apiLimits struct {
+	UDPRatePerSec     uint64        `json:"udp_rate_per_sec"`
+	UDPBurst          uint64        `json:"udp_burst"`
+	InitConnectPerMin uint64        `json:"initconnect_per_min"`
+	InitConnectBurst  uint64        `json:"initconnect_burst"`
+	GetInfoPerMin     uint64        `json:"getinfo_per_min"`
+	GetInfoBurst      uint64        `json:"getinfo_burst"`
+	TCPGlobalPerSec   uint64        `json:"tcp_global_per_sec"`
+	TCPGlobalBurst    uint64        `json:"tcp_global_burst"`
+	TCPMaxOpenPerIP   uint64        `json:"tcp_max_open_per_ip"`
+	WhitelistTTL      time.Duration `json:"whitelist_ttl_ns"`
+	HealthWindow      time.Duration `json:"health_window_ns"`
+	HealthThreshold   uint32        `json:"health_threshold"`
+	HealthBlacklist   time.Duration `json:"health_blacklist_ns"`
+}
+
+// handleInfo answers GET /api/info with version + attach state + configured
+// limits + current map populations + counter totals. One-stop summary.
+func handleInfo(cfg apiCfg) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out := map[string]any{
+			"version":  cfg.Version,
+			"iface":    cfg.Iface,
+			"port":     cfg.Port,
+			"pin_path": cfg.PinPath,
+			"xdp_mode": cfg.Loaded.XDPMode,
+			"attached": map[string]bool{
+				"xdp":     cfg.Loaded.XDPLink != nil,
+				"sockops": cfg.Loaded.SockopsLink != nil,
+			},
+			"limits":   cfg.Limits,
+			"maps":     mapPopulations(cfg.Loaded),
+			"counters": readCounters(cfg.Loaded),
+		}
+		writeJSON(w, out)
+	}
+}
+
+// handleStats answers GET /api/stats with per-CPU summed counter values.
+// Same data as /metrics but in a JSON shape you can feed jq.
+func handleStats(l *loader.Loaded) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, readCounters(l))
+	}
+}
+
+// handleTop answers GET /api/top?map=NAME&n=N with the hottest entries
+// from one map. Same ranking logic as `fivem-ebpf top` (see topFromMap).
+func handleTop(cfg apiCfg) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		which := r.URL.Query().Get("map")
+		if which == "" {
+			http.Error(w, "missing ?map=...", http.StatusBadRequest)
+			return
+		}
+		n := 10
+		if s := r.URL.Query().Get("n"); s != "" {
+			fmt.Sscanf(s, "%d", &n)
+		}
+		rows, err := topFromMap(cfg.PinPath, which, n)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, rows)
+	}
+}
+
+// handleHealth answers GET /api/health[?all=1] with udp_health entries.
+// Default: only blacklisted (?all=1 includes tracked-but-not-banned).
+func handleHealth(m *ebpf.Map) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		all := r.URL.Query().Get("all") == "1"
+		out := []map[string]any{}
+		if m != nil {
+			now := bootNS()
+			var key [4]byte
+			var val struct {
+				Anomalies        uint32
+				_                uint32
+				WindowStartNS    uint64
+				BlacklistUntilNS uint64
+			}
+			iter := m.Iterate()
+			for iter.Next(&key, &val) {
+				blacklisted := val.BlacklistUntilNS > now
+				if !all && !blacklisted {
+					continue
+				}
+				wAge := int64(now) - int64(val.WindowStartNS)
+				if wAge < 0 {
+					wAge = 0
+				}
+				entry := map[string]any{
+					"ip":                 ipv4Str(key),
+					"anomalies":          val.Anomalies,
+					"window_age_seconds": wAge / 1_000_000_000,
+					"blacklisted":        blacklisted,
+				}
+				if blacklisted {
+					entry["blacklist_remaining_seconds"] = int64(val.BlacklistUntilNS-now) / 1_000_000_000
+				}
+				out = append(out, entry)
+			}
+		}
+		writeJSON(w, out)
+	}
+}
+
+func mapPopulations(l *loader.Loaded) map[string]int64 {
+	count := func(m *ebpf.Map) int64 {
+		if m == nil {
+			return -1
+		}
+		var n int64
+		var key [4]byte
+		val := make([]byte, m.ValueSize())
+		iter := m.Iterate()
+		for iter.Next(&key, &val) {
+			n++
+		}
+		return n
+	}
+	return map[string]int64{
+		"tcp_whitelist":         count(l.TCPWhitelist),
+		"tcp_established":       count(l.TCPEstablished),
+		"tcp_syn_seen":          count(l.TCPSynSeen),
+		"tcp_open_count":        count(l.TCPOpenCount),
+		"udp_ratelimit":         count(l.UDPRatelimit),
+		"initconnect_ratelimit": count(l.InitConnectRatelimit),
+		"getinfo_ratelimit":     count(l.GetInfoRatelimit),
+		"udp_health":            count(l.UDPHealth),
+	}
+}
+
+func readCounters(l *loader.Loaded) map[string]uint64 {
+	if l.Stats == nil {
+		return nil
+	}
+	vals, err := readStatsMap(l.Stats)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]uint64, len(statLabels))
+	for i, lbl := range statLabels {
+		out[lbl] = vals[i]
+	}
+	return out
+}
+
 // registerAPI wires the per-IP listing endpoints onto the metrics server's
 // mux. Each endpoint iterates the corresponding pinned BPF map on demand —
 // safe for ad-hoc inspection but a 100k-entry LRU under attack means a slow
 // response. Don't poll these on a tight interval.
-func registerAPI(mux *http.ServeMux, l *loader.Loaded) {
+func registerAPI(mux *http.ServeMux, cfg apiCfg) {
+	l := cfg.Loaded
+	mux.HandleFunc("/api/info", handleInfo(cfg))
+	mux.HandleFunc("/api/stats", handleStats(l))
+	mux.HandleFunc("/api/top", handleTop(cfg))
+	mux.HandleFunc("/api/health", handleHealth(l.UDPHealth))
 	mux.HandleFunc("/api/whitelist", handleTimestampMap(l.TCPWhitelist))
 	mux.HandleFunc("/api/established", handleTimestampMap(l.TCPEstablished))
 	mux.HandleFunc("/api/syn-seen", handleTimestampMap(l.TCPSynSeen))
 	mux.HandleFunc("/api/open-count", handleCountMap(l.TCPOpenCount))
 	mux.HandleFunc("/api/blacklist", handleBlacklist(l.UDPHealth))
+	mux.HandleFunc("/api/ip/", handleIPLookup(l))
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []string{
+			"/api/info",
+			"/api/stats",
+			"/api/top?map=<name>&n=<N>",
+			"/api/health",
 			"/api/whitelist",
 			"/api/blacklist",
 			"/api/established",
 			"/api/syn-seen",
 			"/api/open-count",
+			"/api/ip/<addr>",
 		})
 	})
 }
