@@ -51,5 +51,5 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  fivem-ebpf health  [--all]                 currently-blacklisted IPs (--all: include tracked-but-not-banned)")
 	fmt.Fprintln(os.Stderr, "  fivem-ebpf clear   --map M [--ip A]        wipe a map, or one IP from it")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "M ∈ whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | all")
+	fmt.Fprintln(os.Stderr, "M is one of: whitelist, established, syn-seen, open-count, udp-ratelimit, initconnect-ratelimit, getinfo-ratelimit, health, all")
 }

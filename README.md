@@ -95,7 +95,7 @@ fivem-ebpf health  [--all]                 blacklisted IPs (--all: also tracked-
 fivem-ebpf clear   --map M [--ip A]        wipe a map, or one IP from it
 ```
 
-`M ∈ whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | all`. Run `fivem-ebpf run --help` for `run` flags. All other subcommands operate directly on the pinned BPF maps; the daemon doesn't need to be reachable over HTTP.
+`M` is one of `whitelist`, `established`, `syn-seen`, `open-count`, `udp-ratelimit`, `initconnect-ratelimit`, `getinfo-ratelimit`, `health`, or `all`. Run `fivem-ebpf run --help` for the daemon flags. All other subcommands operate directly on the pinned BPF maps; the daemon doesn't need to be reachable over HTTP.
 
 ## Metrics & API
 
