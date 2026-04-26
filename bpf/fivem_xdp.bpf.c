@@ -440,6 +440,8 @@ int fivem_xdp(struct xdp_md *ctx) {
             return XDP_DROP;
         }
 
+        bpf_map_update_elem(&tcp_whitelist, &src, &now, BPF_ANY);
+
         stat_bump(STAT_PASS_UDP_WHITELISTED);
         return XDP_PASS;
     }
