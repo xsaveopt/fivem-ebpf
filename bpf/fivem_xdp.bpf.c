@@ -303,6 +303,22 @@ int fivem_xdp(struct xdp_md *ctx) {
             return XDP_PASS;
 
         /*
+         * Fast-path for whitelisted IPs. They've completed the L7
+         * handshake (CitizenFX/1 POST /client) so they're real clients
+         * — let their TCP flow freely so asset downloads, reconnects,
+         * and L7 control traffic don't get shed by the global rate
+         * limit during a flood. Refresh the timestamp on the way so an
+         * active TCP session keeps the entry alive without depending
+         * solely on the UDP-side refresh.
+         */
+        __u64 *wl = bpf_map_lookup_elem(&tcp_whitelist, &src);
+        if (wl) {
+            *wl = bpf_ktime_get_boot_ns();
+            stat_bump(STAT_PASS_TCP);
+            return XDP_PASS;
+        }
+
+        /*
          * iptables equivalent:
          *   -A INPUT -p tcp --dport 30120 -m conntrack --ctstate NEW ! --syn -j DROP
          * A non-SYN packet from an IP that has never sent a SYN and isn't
@@ -327,16 +343,18 @@ int fivem_xdp(struct xdp_md *ctx) {
                     return XDP_DROP;
                 }
             }
+            /* Global circuit breaker — only on NEW connections (SYNs).
+             * Applying it to every TCP packet was sheding asset-download
+             * and L7-handshake traffic during floods and breaking real
+             * player joins. New-connection rate is the actual exhaustion
+             * vector; once a flow is established it's already bounded by
+             * the per-IP open-conn cap above. */
+            if (!tcp_global_ratelimit_take()) {
+                stat_bump(STAT_DROP_TCP_GLOBAL_RATELIMIT);
+                return XDP_DROP;
+            }
             __u64 now = bpf_ktime_get_boot_ns();
             bpf_map_update_elem(&tcp_syn_seen, &src, &now, BPF_ANY);
-        }
-
-        /* Global circuit breaker on every TCP packet to the target port.
-         * Caps aggregate TCP load when many-IP attacks slip through per-IP
-         * limits (each IP within budget but the sum saturates the server). */
-        if (!tcp_global_ratelimit_take()) {
-            stat_bump(STAT_DROP_TCP_GLOBAL_RATELIMIT);
-            return XDP_DROP;
         }
 
         __u32 tcp_hlen = tcp->doff * 4;
