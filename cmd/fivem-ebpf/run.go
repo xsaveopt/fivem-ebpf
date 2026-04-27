@@ -36,7 +36,7 @@ func cmdRun(args []string) {
 	getBurst := fs.Uint64("tcp-getinfo-burst", 5, "per-IP GET /info.json etc. burst capacity")
 	tcpGlobalRate := fs.Uint64("tcp-global-rate", 5000, "global circuit-breaker on aggregate TCP packets/sec to target port (0 disables)")
 	tcpGlobalBurst := fs.Uint64("tcp-global-burst", 15000, "global circuit-breaker burst capacity (packets)")
-	tcpMaxOpenPerIP := fs.Uint64("tcp-max-open-per-ip", 8, "drop new SYNs from any IP that already holds this many open TCP sockets to the target port (0 disables)")
+	tcpMaxOpenPerIP := fs.Uint64("tcp-max-open-per-ip", 16, "drop new SYNs from any IP that already holds this many open TCP sockets to the target port (0 disables)")
 	healthWindow := fs.Duration("health-window", 10*time.Second, "anomaly counting window per IP")
 	healthThreshold := fs.Uint("health-threshold", 20, "anomalies per window before blacklisting an IP")
 	healthBlacklist := fs.Duration("health-blacklist", 5*time.Minute, "how long an unhealthy IP stays blacklisted")

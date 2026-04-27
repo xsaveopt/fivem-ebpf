@@ -47,9 +47,12 @@ TCP_GLOBAL_BURST=15000
 # Per-IP cap on simultaneously-open TCP sockets to the target port. Catches
 # connection-hold attacks (bots that complete 3WHS but never speak L7, so
 # none of the payload-based filters fire). Real FiveM clients hold ~4-8
-# parallel connections during asset download; 8 is comfortably permissive.
+# parallel asset-download connections, plus TIME_WAIT residue from prior
+# attempts and concurrent /info.json scrapes — 16 is the empirically-derived
+# headroom that doesn't kick legit retry-storm players. Whitelisted IPs
+# bypass this check entirely (handshake already proves they're real).
 # 0 disables.
-TCP_MAX_OPEN_PER_IP=8
+TCP_MAX_OPEN_PER_IP=16
 
 # UDP health checks. A packet that fails ENet structural validation counts
 # as an anomaly; an IP that accumulates HEALTH_THRESHOLD anomalies within
