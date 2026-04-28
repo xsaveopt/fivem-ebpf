@@ -217,7 +217,7 @@
               {"color": "red", "value": 10000}
             ]
           },
-          "unit": "pps",
+          "unit": "suffix:p/s",
           "decimals": 0
         },
         "overrides": []
@@ -249,7 +249,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "fixed", "fixedColor": "green"},
-          "unit": "pps",
+          "unit": "suffix:p/s",
           "decimals": 0
         },
         "overrides": []
@@ -288,7 +288,7 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "unit": "pps",
+          "unit": "suffix:p/s",
           "color": {"mode": "palette-classic"}
         },
         "overrides": [
@@ -340,7 +340,7 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "unit": "pps",
+          "unit": "suffix:p/s",
           "color": {"mode": "palette-classic"}
         },
         "overrides": [
@@ -396,7 +396,7 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "unit": "pps",
+          "unit": "suffix:p/s",
           "color": {"mode": "palette-classic"}
         },
         "overrides": [
@@ -480,7 +480,7 @@
             "spanNulls": true,
             "lineWidth": 2
           },
-          "unit": "ops",
+          "unit": "suffix:ev/s",
           "color": {"mode": "palette-classic"}
         },
         "overrides": [
