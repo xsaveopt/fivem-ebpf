@@ -57,8 +57,8 @@ TCP_MAX_OPEN_PER_IP=16
 # UDP health checks. A packet that fails ENet structural validation counts
 # as an anomaly; an IP that accumulates HEALTH_THRESHOLD anomalies within
 # HEALTH_WINDOW is blacklisted for HEALTH_BLACKLIST.
-HEALTH_WINDOW=10s
-HEALTH_THRESHOLD=20
+HEALTH_WINDOW=60s
+HEALTH_THRESHOLD=100
 HEALTH_BLACKLIST=5m
 
 # How often to refresh the fivem_map_entries Prometheus gauges. Iterating
