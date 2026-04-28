@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -51,6 +52,7 @@ func cmdInspect(args []string) {
 		inspectRatelimit(*pinPath, "initconnect_ratelimit", key, now)
 		inspectRatelimit(*pinPath, "getinfo_ratelimit", key, now)
 		inspectHealth(*pinPath, "udp_health", key, now)
+		inspectDropHistory(*pinPath, "ip_drop_history", key, now)
 	}
 
 	if *watch == 0 {
@@ -178,6 +180,50 @@ func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
 			remaining.Truncate(time.Second))
 	} else {
 		body += " blacklisted=no"
+	}
+	inspectLine(name, body)
+}
+
+func inspectDropHistory(pinPath, name string, key [4]byte, now uint64) {
+	m, ok := openPinned(pinPath, name)
+	if !ok {
+		return
+	}
+	defer m.Close()
+	var val struct {
+		FirstDropNS uint64
+		LastDropNS  uint64
+		Counts      [12]uint64
+	}
+	if err := m.Lookup(&key, &val); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			inspectLine(name, "-")
+		} else {
+			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
+		}
+		return
+	}
+	first := time.Duration(int64(now) - int64(val.FirstDropNS))
+	if first < 0 {
+		first = 0
+	}
+	last := time.Duration(int64(now) - int64(val.LastDropNS))
+	if last < 0 {
+		last = 0
+	}
+	var total uint64
+	var parts []string
+	for i, c := range val.Counts {
+		if c == 0 {
+			continue
+		}
+		total += c
+		parts = append(parts, fmt.Sprintf("%s=%d", dropReasonNames[i], c))
+	}
+	body := fmt.Sprintf("first=%s last=%s total=%d",
+		first.Truncate(time.Second), last.Truncate(time.Second), total)
+	if len(parts) > 0 {
+		body += " " + strings.Join(parts, ",")
 	}
 	inspectLine(name, body)
 }

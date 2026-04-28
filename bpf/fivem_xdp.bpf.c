@@ -144,6 +144,31 @@ static __always_inline bool health_is_blacklisted(__be32 src_ip) {
     return h->blacklist_until_ns > now;
 }
 
+/*
+ * Bump the per-IP × per-reason drop counter for triage queries via
+ * /api/ip/<addr>. Atomic on the counter so concurrent CPUs hitting the same
+ * src don't lose increments; last-write-wins on last_drop_ns is fine because
+ * racing writes both store "now". reason_idx is always a compile-time
+ * constant from enum drop_reason_idx at the call site, so the bound check
+ * folds away.
+ */
+static __always_inline void record_drop(__be32 src_ip, __u32 reason_idx) {
+    if (reason_idx >= NUM_DROP_REASONS)
+        return;
+    __u64 now = bpf_ktime_get_boot_ns();
+    struct ip_drop_history *h = bpf_map_lookup_elem(&ip_drop_history, &src_ip);
+    if (!h) {
+        struct ip_drop_history init = {0};
+        init.first_drop_ns = now;
+        init.last_drop_ns  = now;
+        init.counts[reason_idx] = 1;
+        bpf_map_update_elem(&ip_drop_history, &src_ip, &init, BPF_ANY);
+        return;
+    }
+    h->last_drop_ns = now;
+    __sync_fetch_and_add(&h->counts[reason_idx], 1);
+}
+
 static __always_inline void health_record_anomaly(__be32 src_ip) {
     __u64 now = bpf_ktime_get_boot_ns();
     struct udp_health *h = bpf_map_lookup_elem(&udp_health, &src_ip);
@@ -328,6 +353,7 @@ int fivem_xdp(struct xdp_md *ctx) {
         if (!tcp->syn) {
             if (!bpf_map_lookup_elem(&tcp_syn_seen, &src) &&
                 !bpf_map_lookup_elem(&tcp_established, &src)) {
+                record_drop(src, DROP_REASON_TCP_NO_SYN);
                 stat_bump(STAT_DROP_TCP_NO_SYN);
                 return XDP_DROP;
             }
@@ -339,6 +365,7 @@ int fivem_xdp(struct xdp_md *ctx) {
             if (tcp_max_open_per_ip > 0) {
                 __u64 *open = bpf_map_lookup_elem(&tcp_open_count, &src);
                 if (open && *open >= tcp_max_open_per_ip) {
+                    record_drop(src, DROP_REASON_TCP_TOO_MANY_OPEN);
                     stat_bump(STAT_DROP_TCP_TOO_MANY_OPEN);
                     return XDP_DROP;
                 }
@@ -350,6 +377,7 @@ int fivem_xdp(struct xdp_md *ctx) {
              * vector; once a flow is established it's already bounded by
              * the per-IP open-conn cap above. */
             if (!tcp_global_ratelimit_take()) {
+                record_drop(src, DROP_REASON_TCP_GLOBAL_RATELIMIT);
                 stat_bump(STAT_DROP_TCP_GLOBAL_RATELIMIT);
                 return XDP_DROP;
             }
@@ -378,6 +406,7 @@ int fivem_xdp(struct xdp_md *ctx) {
          * used as a probe. */
         enum ua_result ua = scan_user_agent(payload, data_end);
         if (ua == UA_BOT) {
+            record_drop(src, DROP_REASON_TCP_BAD_USER_AGENT);
             stat_bump(STAT_DROP_TCP_BAD_USER_AGENT);
             return XDP_DROP;
         }
@@ -387,6 +416,7 @@ int fivem_xdp(struct xdp_md *ctx) {
 
             if (!ratelimit_take(&initconnect_ratelimit, src,
                                 initconnect_period_ns, initconnect_burst)) {
+                record_drop(src, DROP_REASON_TCP_INITCONNECT_RATELIMIT);
                 stat_bump(STAT_DROP_TCP_INITCONNECT_RATELIMIT);
                 return XDP_DROP;
             }
@@ -411,6 +441,7 @@ int fivem_xdp(struct xdp_md *ctx) {
 
         if (!ratelimit_take(&getinfo_ratelimit, src,
                             getinfo_period_ns, getinfo_burst)) {
+            record_drop(src, DROP_REASON_TCP_GETINFO_RATELIMIT);
             stat_bump(STAT_DROP_TCP_GETINFO_RATELIMIT);
             return XDP_DROP;
         }
@@ -420,6 +451,7 @@ int fivem_xdp(struct xdp_md *ctx) {
     if (ip->protocol == IPPROTO_UDP) {
         struct udphdr *udp = l4;
         if ((void *)(udp + 1) > data_end) {
+            record_drop(src, DROP_REASON_MALFORMED);
             stat_bump(STAT_DROP_MALFORMED);
             return XDP_DROP;
         }
@@ -428,17 +460,20 @@ int fivem_xdp(struct xdp_md *ctx) {
 
         __u64 *last = bpf_map_lookup_elem(&tcp_whitelist, &src);
         if (!last) {
+            record_drop(src, DROP_REASON_UDP_NOT_WHITELISTED);
             stat_bump(STAT_DROP_UDP_NOT_WHITELISTED);
             return XDP_DROP;
         }
 
         __u64 now = bpf_ktime_get_boot_ns();
         if (now - *last > whitelist_ttl_ns) {
+            record_drop(src, DROP_REASON_UDP_EXPIRED);
             stat_bump(STAT_DROP_UDP_EXPIRED);
             return XDP_DROP;
         }
 
         if (health_is_blacklisted(src)) {
+            record_drop(src, DROP_REASON_UDP_UNHEALTHY);
             stat_bump(STAT_DROP_UDP_UNHEALTHY);
             return XDP_DROP;
         }
@@ -447,6 +482,7 @@ int fivem_xdp(struct xdp_md *ctx) {
         if (!is_oob_prefix(udp_payload, data_end)) {
             if (!enet_looks_valid(udp_payload, data_end)) {
                 health_record_anomaly(src);
+                record_drop(src, DROP_REASON_UDP_ENET_MALFORMED);
                 stat_bump(STAT_DROP_UDP_ENET_MALFORMED);
                 return XDP_DROP;
             }
@@ -454,6 +490,7 @@ int fivem_xdp(struct xdp_md *ctx) {
 
         if (!ratelimit_take(&udp_ratelimit, src,
                             udp_refill_period_ns, udp_burst)) {
+            record_drop(src, DROP_REASON_UDP_RATELIMIT);
             stat_bump(STAT_DROP_UDP_RATELIMIT);
             return XDP_DROP;
         }

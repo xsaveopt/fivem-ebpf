@@ -6,20 +6,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
 )
 
 type topRow struct {
-	IP          string `json:"ip"`
-	Sort        int64  `json:"-"` // ranking key; not serialized
-	Display     string `json:"-"` // human-readable summary; not serialized
-	Tokens      uint64 `json:"tokens,omitempty"`
-	Count       uint64 `json:"count,omitempty"`
-	AgeSeconds  int64  `json:"age_seconds,omitempty"`
-	Anomalies   uint32 `json:"anomalies,omitempty"`
-	Blacklisted bool   `json:"blacklisted,omitempty"`
+	IP          string            `json:"ip"`
+	Sort        int64             `json:"-"` // ranking key; not serialized
+	Display     string            `json:"-"` // human-readable summary; not serialized
+	Tokens      uint64            `json:"tokens,omitempty"`
+	Count       uint64            `json:"count,omitempty"`
+	AgeSeconds  int64             `json:"age_seconds,omitempty"`
+	Anomalies   uint32            `json:"anomalies,omitempty"`
+	Blacklisted bool              `json:"blacklisted,omitempty"`
+	Total       uint64            `json:"total,omitempty"`
+	ByReason    map[string]uint64 `json:"by_reason,omitempty"`
 }
 
 // topMapKinds maps the user-facing map name to (pinned name, kind). Kind
@@ -36,6 +39,7 @@ var topMapKinds = map[string]struct {
 	"initconnect-ratelimit": {"initconnect_ratelimit", "ratelimit"},
 	"getinfo-ratelimit":     {"getinfo_ratelimit", "ratelimit"},
 	"health":                {"udp_health", "health"},
+	"drop-history":          {"ip_drop_history", "drop-reasons"},
 }
 
 // topFromMap iterates the named map and returns rows sorted "most
@@ -44,10 +48,25 @@ var topMapKinds = map[string]struct {
 //   - count map:      highest count first (heaviest sockets / most-active)
 //   - ratelimit:      fewest tokens first (most rate-limited / hot IPs)
 //   - health:         most anomalies first
-func topFromMap(pinPath, which string, n int) ([]topRow, error) {
+//   - drop-reasons:   highest total drops first, OR if reason!="" the
+//                     count for just that reason (other reasons still
+//                     reported in by_reason for context)
+func topFromMap(pinPath, which string, n int, reason string) ([]topRow, error) {
 	mt, ok := topMapKinds[which]
 	if !ok {
 		return nil, fmt.Errorf("unknown map: %s", which)
+	}
+	reasonIdx := -1
+	if reason != "" {
+		for i, name := range dropReasonNames {
+			if name == reason {
+				reasonIdx = i
+				break
+			}
+		}
+		if reasonIdx < 0 {
+			return nil, fmt.Errorf("unknown reason: %s", reason)
+		}
 	}
 	m, err := ebpf.LoadPinnedMap(filepath.Join(pinPath, mt.pinned), nil)
 	if err != nil {
@@ -135,6 +154,41 @@ func topFromMap(pinPath, which string, n int) ([]topRow, error) {
 					v.Anomalies, time.Duration(wAge).Truncate(time.Second), tag),
 			})
 		}
+	case "drop-reasons":
+		var v struct {
+			FirstDropNS uint64
+			LastDropNS  uint64
+			Counts      [12]uint64
+		}
+		iter := m.Iterate()
+		for iter.Next(&key, &v) {
+			var total uint64
+			by := make(map[string]uint64)
+			for i, c := range v.Counts {
+				if c == 0 {
+					continue
+				}
+				total += c
+				by[dropReasonNames[i]] = c
+			}
+			sortKey := int64(total)
+			if reasonIdx >= 0 {
+				sortKey = int64(v.Counts[reasonIdx])
+			}
+			parts := make([]string, 0, len(by))
+			for _, name := range dropReasonNames {
+				if c, ok := by[name]; ok {
+					parts = append(parts, fmt.Sprintf("%s=%d", name, c))
+				}
+			}
+			rows = append(rows, topRow{
+				IP:       ipv4Str(key),
+				Sort:     sortKey,
+				Total:    total,
+				ByReason: by,
+				Display:  fmt.Sprintf("total=%d %s", total, strings.Join(parts, ",")),
+			})
+		}
 	}
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Sort > rows[j].Sort })
@@ -147,11 +201,12 @@ func topFromMap(pinPath, which string, n int) ([]topRow, error) {
 func cmdTop(args []string) {
 	fs := flag.NewFlagSet("top", flag.ExitOnError)
 	pinPath := fs.String("pin-path", "/sys/fs/bpf/fivem", "bpf map pin directory")
-	which := fs.String("map", "open-count", "which map: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health")
+	which := fs.String("map", "open-count", "which map: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | drop-history")
 	n := fs.Int("n", 10, "max entries to print (0 for all)")
+	reason := fs.String("reason", "", "for --map drop-history: rank by this reason instead of total drops (e.g. tcp_too_many_open)")
 	_ = fs.Parse(args)
 
-	rows, err := topFromMap(*pinPath, *which, *n)
+	rows, err := topFromMap(*pinPath, *which, *n, *reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "top:", err)
 		os.Exit(1)

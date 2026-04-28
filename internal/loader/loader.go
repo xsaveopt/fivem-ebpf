@@ -43,6 +43,7 @@ type Loaded struct {
 	TCPGlobalRatelimit   *ebpf.Map
 	TCPOpenCount         *ebpf.Map
 	UDPHealth            *ebpf.Map
+	IPDropHistory        *ebpf.Map
 	Stats                *ebpf.Map
 	XDPMode              string
 }
@@ -63,7 +64,7 @@ func (l *Loaded) Close() error {
 		l.TCPEstablished, l.TCPSynSeen, l.TCPWhitelist,
 		l.UDPRatelimit, l.InitConnectRatelimit,
 		l.GetInfoRatelimit, l.TCPGlobalRatelimit,
-		l.TCPOpenCount, l.UDPHealth, l.Stats,
+		l.TCPOpenCount, l.UDPHealth, l.IPDropHistory, l.Stats,
 	} {
 		if m != nil {
 			m.Close()
@@ -126,6 +127,7 @@ func Load(opts Options) (*Loaded, error) {
 		TCPGlobalRatelimit:   xobj.TcpGlobalRatelimit,
 		TCPOpenCount:         xobj.TcpOpenCount,
 		UDPHealth:            xobj.UdpHealth,
+		IPDropHistory:        xobj.IpDropHistory,
 		Stats:                xobj.Stats,
 		XDPMode:              xmode,
 	}, nil
@@ -275,7 +277,7 @@ func closeXDPMaps(o *fivemXDPObjects) {
 		o.TcpEstablished, o.TcpSynSeen, o.TcpWhitelist,
 		o.UdpRatelimit, o.InitconnectRatelimit,
 		o.GetinfoRatelimit, o.TcpGlobalRatelimit,
-		o.TcpOpenCount, o.UdpHealth, o.Stats,
+		o.TcpOpenCount, o.UdpHealth, o.IpDropHistory, o.Stats,
 	} {
 		if m != nil {
 			m.Close()

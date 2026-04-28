@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -15,7 +16,7 @@ import (
 func cmdDump(args []string) {
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
 	pinPath := fs.String("pin-path", "/sys/fs/bpf/fivem", "bpf map pin directory")
-	which := fs.String("map", "whitelist", "which map to dump: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | all")
+	which := fs.String("map", "whitelist", "which map to dump: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | drop-history | all")
 	_ = fs.Parse(args)
 
 	switch *which {
@@ -35,6 +36,8 @@ func cmdDump(args []string) {
 		dumpRatelimitMap(*pinPath, "getinfo_ratelimit")
 	case "health":
 		dumpHealthMap(*pinPath, "udp_health")
+	case "drop-history":
+		dumpDropHistoryMap(*pinPath, "ip_drop_history")
 	case "all":
 		fmt.Println("== tcp_established ==")
 		dumpTimestampMap(*pinPath, "tcp_established")
@@ -52,6 +55,8 @@ func cmdDump(args []string) {
 		dumpRatelimitMap(*pinPath, "getinfo_ratelimit")
 		fmt.Println("\n== udp_health ==")
 		dumpHealthMap(*pinPath, "udp_health")
+		fmt.Println("\n== ip_drop_history ==")
+		dumpDropHistoryMap(*pinPath, "ip_drop_history")
 	default:
 		fmt.Fprintln(os.Stderr, "unknown map:", *which)
 		os.Exit(2)
@@ -166,6 +171,54 @@ func dumpHealthMap(pinPath, name string) {
 		fmt.Printf("%-16s %-10d %-12s %-12s\n",
 			ip.String(), val.Anomalies,
 			windowAge.Truncate(time.Second), bl)
+	}
+	if err := iter.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "iter:", err)
+	}
+}
+
+func dumpDropHistoryMap(pinPath, name string) {
+	m, err := ebpf.LoadPinnedMap(filepath.Join(pinPath, name), nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open", name+":", err)
+		return
+	}
+	defer m.Close()
+
+	now := bootTimeNS()
+	fmt.Printf("%-16s %-12s %-12s %-10s %s\n", "IP", "FIRST_AGE", "LAST_AGE", "TOTAL", "BY_REASON")
+	var key [4]byte
+	var val struct {
+		FirstDropNS uint64
+		LastDropNS  uint64
+		Counts      [12]uint64
+	}
+	iter := m.Iterate()
+	for iter.Next(&key, &val) {
+		ip := net.IPv4(key[0], key[1], key[2], key[3])
+		first := time.Duration(int64(now) - int64(val.FirstDropNS))
+		if first < 0 {
+			first = 0
+		}
+		last := time.Duration(int64(now) - int64(val.LastDropNS))
+		if last < 0 {
+			last = 0
+		}
+		var total uint64
+		var parts []string
+		for i, c := range val.Counts {
+			if c == 0 {
+				continue
+			}
+			total += c
+			parts = append(parts, fmt.Sprintf("%s=%d", dropReasonNames[i], c))
+		}
+		fmt.Printf("%-16s %-12s %-12s %-10d %s\n",
+			ip.String(),
+			first.Truncate(time.Second),
+			last.Truncate(time.Second),
+			total,
+			strings.Join(parts, ","))
 	}
 	if err := iter.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "iter:", err)

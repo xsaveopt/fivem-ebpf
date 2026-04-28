@@ -14,7 +14,7 @@ import (
 func cmdClear(args []string) {
 	fs := flag.NewFlagSet("clear", flag.ExitOnError)
 	pinPath := fs.String("pin-path", "/sys/fs/bpf/fivem", "bpf map pin directory")
-	which := fs.String("map", "whitelist", "which map to clear: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | all")
+	which := fs.String("map", "whitelist", "which map to clear: whitelist | established | syn-seen | open-count | udp-ratelimit | initconnect-ratelimit | getinfo-ratelimit | health | drop-history | all")
 	ipFlag := fs.String("ip", "", "if set, only clear this single IPv4 from the target map(s) instead of wiping every entry")
 	_ = fs.Parse(args)
 
@@ -36,8 +36,10 @@ func cmdClear(args []string) {
 		targets = []string{"getinfo_ratelimit"}
 	case "health":
 		targets = []string{"udp_health"}
+	case "drop-history":
+		targets = []string{"ip_drop_history"}
 	case "all":
-		targets = []string{"tcp_whitelist", "tcp_established", "tcp_syn_seen", "tcp_open_count", "udp_ratelimit", "initconnect_ratelimit", "getinfo_ratelimit", "udp_health"}
+		targets = []string{"tcp_whitelist", "tcp_established", "tcp_syn_seen", "tcp_open_count", "udp_ratelimit", "initconnect_ratelimit", "getinfo_ratelimit", "udp_health", "ip_drop_history"}
 	default:
 		fmt.Fprintln(os.Stderr, "unknown map:", *which)
 		os.Exit(2)

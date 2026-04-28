@@ -54,6 +54,7 @@ type MapSizes struct {
 	initcRL     atomic.Int64
 	getinfoRL   atomic.Int64
 	health      atomic.Int64
+	dropHistory atomic.Int64
 	blacklisted atomic.Int64 // IPs with blacklist_until_ns > now
 }
 
@@ -67,6 +68,7 @@ type Collector struct {
 	initcRLMap       *ebpf.Map
 	getinfoRLMap     *ebpf.Map
 	healthMap        *ebpf.Map
+	dropHistoryMap   *ebpf.Map
 
 	sizes MapSizes
 
@@ -98,6 +100,7 @@ type Maps struct {
 	InitcRL      *ebpf.Map
 	GetinfoRL    *ebpf.Map
 	Health       *ebpf.Map
+	DropHistory  *ebpf.Map
 }
 
 func NewCollector(
@@ -115,6 +118,7 @@ func NewCollector(
 		initcRLMap:     maps.InitcRL,
 		getinfoRLMap:   maps.GetinfoRL,
 		healthMap:      maps.Health,
+		dropHistoryMap: maps.DropHistory,
 		packets: prometheus.NewDesc(
 			"fivem_xdp_packets_total",
 			"Packets observed by the FiveM XDP filter.",
@@ -200,6 +204,7 @@ func (c *Collector) refreshSizes() {
 	c.sizes.udpRL.Store(countKeys(c.udpRLMap))
 	c.sizes.initcRL.Store(countKeys(c.initcRLMap))
 	c.sizes.getinfoRL.Store(countKeys(c.getinfoRLMap))
+	c.sizes.dropHistory.Store(countKeys(c.dropHistoryMap))
 	total, blacklisted := countHealth(c.healthMap)
 	c.sizes.health.Store(total)
 	c.sizes.blacklisted.Store(blacklisted)
@@ -313,6 +318,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	mapSize("initconnect_ratelimit", c.sizes.initcRL.Load())
 	mapSize("getinfo_ratelimit", c.sizes.getinfoRL.Load())
 	mapSize("udp_health", c.sizes.health.Load())
+	mapSize("ip_drop_history", c.sizes.dropHistory.Load())
 
 	ch <- prometheus.MustNewConstMetric(c.blacklisted, prometheus.GaugeValue, float64(c.sizes.blacklisted.Load()))
 	ch <- prometheus.MustNewConstMetric(

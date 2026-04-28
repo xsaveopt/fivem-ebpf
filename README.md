@@ -89,13 +89,13 @@ fivem-ebpf run     [flags]                 attach BPF, serve /metrics + /api/*
 fivem-ebpf info                            counters + map sizes
 fivem-ebpf stats   [--json] [--watch 1s]   per-CPU stat counters
 fivem-ebpf top     --map M [-n 10]         hottest IPs in a per-IP map
-fivem-ebpf inspect <ipv4> [--watch 1s]     all per-IP state for one address
+fivem-ebpf inspect <ipv4> [--watch 1s]     all per-IP state for one address, including cumulative drop counts by reason
 fivem-ebpf dump    --map M                 full listing of a map
 fivem-ebpf health  [--all]                 blacklisted IPs (--all: also tracked-but-not-banned)
 fivem-ebpf clear   --map M [--ip A]        wipe a map, or one IP from it
 ```
 
-`M` is one of `whitelist`, `established`, `syn-seen`, `open-count`, `udp-ratelimit`, `initconnect-ratelimit`, `getinfo-ratelimit`, `health`, or `all`. Run `fivem-ebpf run --help` for the daemon flags. All other subcommands operate directly on the pinned BPF maps; the daemon doesn't need to be reachable over HTTP.
+`M` is one of `whitelist`, `established`, `syn-seen`, `open-count`, `udp-ratelimit`, `initconnect-ratelimit`, `getinfo-ratelimit`, `health`, `drop-history`, or `all`. Run `fivem-ebpf run --help` for the daemon flags. All other subcommands operate directly on the pinned BPF maps; the daemon doesn't need to be reachable over HTTP.
 
 ## Metrics & API
 
@@ -107,7 +107,8 @@ fivem-ebpf clear   --map M [--ip A]        wipe a map, or one IP from it
 - `/api/top?map=<name>&n=<N>` — hottest IPs in one map (same ranking as `fivem-ebpf top`).
 - `/api/health[?all=1]` — blacklisted IPs; `?all=1` includes tracked-but-not-banned.
 - `/api/whitelist` `/api/blacklist` `/api/established` `/api/syn-seen` `/api/open-count` — per-map listings.
-- `/api/ip/<addr>` — every map's view of one IPv4 in a single JSON object. The "why was this player kicked" endpoint.
+- `/api/drop-history` — per-IP cumulative drop counts grouped by reason; pair with `/api/top?map=drop-history&reason=<name>` to rank.
+- `/api/ip/<addr>` — every map's view of one IPv4 in a single JSON object, including a `drop_history` block. The "why was this player kicked" endpoint.
 - `/api/state` — index.
 
 The release ships two Grafana dashboards in `/etc/fivem-ebpf/grafana/`: the main metrics dashboard, and a per-IP listings dashboard that needs the [Infinity datasource](https://grafana.com/grafana/plugins/yesoreyeram-infinity-datasource/) plugin (point it at your `:9464`).

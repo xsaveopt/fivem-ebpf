@@ -31,6 +31,38 @@ type countEntry struct {
 	Count uint64 `json:"count"`
 }
 
+// Indices match enum drop_reason_idx in bpf/shared/maps.h. Keep this slice
+// in lockstep with that enum — adding a reason there means appending here
+// AND bumping NUM_DROP_REASONS in the BPF header.
+var dropReasonNames = [12]string{
+	"tcp_no_syn",
+	"tcp_too_many_open",
+	"tcp_global_ratelimit",
+	"tcp_bad_user_agent",
+	"tcp_initconnect_ratelimit",
+	"tcp_getinfo_ratelimit",
+	"malformed",
+	"udp_not_whitelisted",
+	"udp_expired",
+	"udp_unhealthy",
+	"udp_enet_malformed",
+	"udp_ratelimit",
+}
+
+type ipDropHistoryValue struct {
+	FirstDropNS uint64
+	LastDropNS  uint64
+	Counts      [12]uint64
+}
+
+type dropHistoryEntry struct {
+	IP                  string            `json:"ip"`
+	FirstDropAgeSeconds int64             `json:"first_drop_age_seconds"`
+	LastDropAgeSeconds  int64             `json:"last_drop_age_seconds"`
+	Total               uint64            `json:"total"`
+	ByReason            map[string]uint64 `json:"by_reason"`
+}
+
 func bootNS() uint64 {
 	var ts unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
@@ -155,6 +187,7 @@ func handleIPLookup(l *loader.Loaded) http.HandlerFunc {
 			"initconnect_ratelimit": lookupRatelimit(l.InitConnectRatelimit, key, now),
 			"getinfo_ratelimit":     lookupRatelimit(l.GetInfoRatelimit, key, now),
 			"udp_health":            lookupHealth(l.UDPHealth, key, now),
+			"drop_history":          lookupDropHistory(l.IPDropHistory, key, now),
 		}
 		writeJSON(w, out)
 	}
@@ -204,6 +237,44 @@ func lookupRatelimit(m *ebpf.Map, key [4]byte, now uint64) any {
 	return map[string]any{
 		"tokens":                  val.Tokens,
 		"last_refill_age_seconds": age / 1_000_000_000,
+	}
+}
+
+// lookupDropHistory returns nil when the IP has no entry in the per-IP
+// drop history map, so the JSON omits the field cleanly. When present:
+// first/last age in seconds plus a `by_reason` map containing only the
+// reasons with nonzero counts (keeps output uncluttered for IPs that
+// only ever hit one or two layers).
+func lookupDropHistory(m *ebpf.Map, key [4]byte, now uint64) any {
+	if m == nil {
+		return nil
+	}
+	var val ipDropHistoryValue
+	if err := m.Lookup(&key, &val); err != nil {
+		return nil
+	}
+	first := int64(now) - int64(val.FirstDropNS)
+	if first < 0 {
+		first = 0
+	}
+	last := int64(now) - int64(val.LastDropNS)
+	if last < 0 {
+		last = 0
+	}
+	var total uint64
+	by := make(map[string]uint64)
+	for i, c := range val.Counts {
+		if c == 0 {
+			continue
+		}
+		total += c
+		by[dropReasonNames[i]] = c
+	}
+	return map[string]any{
+		"first_drop_age_seconds": first / 1_000_000_000,
+		"last_drop_age_seconds":  last / 1_000_000_000,
+		"total":                  total,
+		"by_reason":              by,
 	}
 }
 
@@ -293,8 +364,9 @@ func handleStats(l *loader.Loaded) http.HandlerFunc {
 	}
 }
 
-// handleTop answers GET /api/top?map=NAME&n=N with the hottest entries
-// from one map. Same ranking logic as `fivem-ebpf top` (see topFromMap).
+// handleTop answers GET /api/top?map=NAME&n=N[&reason=R] with the hottest
+// entries from one map. Same ranking logic as `fivem-ebpf top`.
+// `reason` only applies to map=drop-history; ignored elsewhere.
 func handleTop(cfg apiCfg) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		which := r.URL.Query().Get("map")
@@ -306,12 +378,56 @@ func handleTop(cfg apiCfg) http.HandlerFunc {
 		if s := r.URL.Query().Get("n"); s != "" {
 			fmt.Sscanf(s, "%d", &n)
 		}
-		rows, err := topFromMap(cfg.PinPath, which, n)
+		reason := r.URL.Query().Get("reason")
+		rows, err := topFromMap(cfg.PinPath, which, n, reason)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		writeJSON(w, rows)
+	}
+}
+
+// handleDropHistory answers GET /api/drop-history with the entire
+// ip_drop_history map. Per-reason buckets are filtered to nonzero counts
+// only. Iterating a 100k-entry LRU during an active attack is not free —
+// don't wire this into a polling loop.
+func handleDropHistory(m *ebpf.Map) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out := []dropHistoryEntry{}
+		if m != nil {
+			now := bootNS()
+			var key [4]byte
+			var val ipDropHistoryValue
+			iter := m.Iterate()
+			for iter.Next(&key, &val) {
+				first := int64(now) - int64(val.FirstDropNS)
+				if first < 0 {
+					first = 0
+				}
+				last := int64(now) - int64(val.LastDropNS)
+				if last < 0 {
+					last = 0
+				}
+				var total uint64
+				by := make(map[string]uint64)
+				for i, c := range val.Counts {
+					if c == 0 {
+						continue
+					}
+					total += c
+					by[dropReasonNames[i]] = c
+				}
+				out = append(out, dropHistoryEntry{
+					IP:                  ipv4Str(key),
+					FirstDropAgeSeconds: first / 1_000_000_000,
+					LastDropAgeSeconds:  last / 1_000_000_000,
+					Total:               total,
+					ByReason:            by,
+				})
+			}
+		}
+		writeJSON(w, out)
 	}
 }
 
@@ -379,6 +495,7 @@ func mapPopulations(l *loader.Loaded) map[string]int64 {
 		"initconnect_ratelimit": count(l.InitConnectRatelimit),
 		"getinfo_ratelimit":     count(l.GetInfoRatelimit),
 		"udp_health":            count(l.UDPHealth),
+		"ip_drop_history":       count(l.IPDropHistory),
 	}
 }
 
@@ -412,6 +529,7 @@ func registerAPI(mux *http.ServeMux, cfg apiCfg) {
 	mux.HandleFunc("/api/syn-seen", handleTimestampMap(l.TCPSynSeen))
 	mux.HandleFunc("/api/open-count", handleCountMap(l.TCPOpenCount))
 	mux.HandleFunc("/api/blacklist", handleBlacklist(l.UDPHealth))
+	mux.HandleFunc("/api/drop-history", handleDropHistory(l.IPDropHistory))
 	mux.HandleFunc("/api/ip/", handleIPLookup(l))
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []string{
@@ -424,6 +542,7 @@ func registerAPI(mux *http.ServeMux, cfg apiCfg) {
 			"/api/established",
 			"/api/syn-seen",
 			"/api/open-count",
+			"/api/drop-history",
 			"/api/ip/<addr>",
 		})
 	})

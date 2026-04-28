@@ -101,15 +101,16 @@ func cmdRun(args []string) {
 	reg := prometheus.NewRegistry()
 	collector := metrics.NewCollector(
 		metrics.Maps{
-			Stats:        l.Stats,
-			Whitelist:    l.TCPWhitelist,
-			Established:  l.TCPEstablished,
-			SynSeen:      l.TCPSynSeen,
-			OpenCount:    l.TCPOpenCount,
-			UDPRatelimit: l.UDPRatelimit,
-			InitcRL:      l.InitConnectRatelimit,
-			GetinfoRL:    l.GetInfoRatelimit,
-			Health:       l.UDPHealth,
+			Stats:         l.Stats,
+			Whitelist:     l.TCPWhitelist,
+			Established:   l.TCPEstablished,
+			SynSeen:       l.TCPSynSeen,
+			OpenCount:     l.TCPOpenCount,
+			UDPRatelimit:  l.UDPRatelimit,
+			InitcRL:       l.InitConnectRatelimit,
+			GetinfoRL:     l.GetInfoRatelimit,
+			Health:        l.UDPHealth,
+			DropHistory:   l.IPDropHistory,
 		},
 		*iface, uint16(*port), version,
 		func() bool { return l.XDPLink != nil },
@@ -154,6 +155,7 @@ func cmdRun(args []string) {
 			"  /api/established             IPs in tcp_established\n" +
 			"  /api/syn-seen                IPs in tcp_syn_seen\n" +
 			"  /api/open-count              open TCP socket count per IP\n" +
+			"  /api/drop-history            per-IP cumulative drops by reason\n" +
 			"  /api/ip/<addr>               aggregate state for one IPv4 across all maps\n" +
 			"  /api/state                   index of the above\n"))
 	})

@@ -19,6 +19,7 @@ var perIPMaps = []string{
 	"initconnect_ratelimit",
 	"getinfo_ratelimit",
 	"udp_health",
+	"ip_drop_history",
 }
 
 // mapEntryCount returns the number of entries in the named pinned map, or
