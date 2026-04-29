@@ -121,6 +121,17 @@ The release ships two Grafana dashboards in `/etc/fivem-ebpf/grafana/`: the main
 - **IPv4 only.** Sockops uses `remote_ip4`. FiveM bound to `::` and reached over native v6 skips the filter — bind `0.0.0.0` explicitly.
 - **XDP mode matters.** Native XDP for production numbers. Generic-mode fallback is correct but slow; the daemon logs which mode attached.
 
+## Operational pitfalls
+
+- **Upgrades and fresh installs drop every active UDP session.** `install.sh` wipes `/sys/fs/bpf/fivem/` so map shapes can change between releases. The whitelist resets to empty, but the sockops program only seeds `tcp_established` from `PASSIVE_ESTABLISHED_CB` on **new** TCP connections — already-connected players never re-trigger that callback, so their next `POST /client` will not promote and their UDP gets dropped as `not_whitelisted` until they fully reconnect. Same applies the very first time you install on a live server. Plan for off-peak, or expect a one-time mass reconnect.
+- **Plain `systemctl restart` is mostly safe** *only if you didn't change anything that alters pin shape* (stat-slot count, map value types). Pins persist, the new daemon reuses the existing whitelist. If you bumped the binary across a release boundary outside of `install.sh`, hand-wipe `/sys/fs/bpf/fivem/` and accept the reconnect.
+- **`clear --map whitelist` (or `--map all`) is production-fatal.** Same blast radius as a wipe-and-restart with no recovery path short of a reconnect storm. Don't run it on a live server unless that's what you want.
+- **NAT or a TCP-terminating proxy in front collapses every player into one source IP.** Per-IP rate limits then starve legitimate traffic, and one bad client poisons the whole server. PROXY protocol / `X-Forwarded-For` are not parsed. Attach on the upstream NIC, not behind a load balancer.
+- **XDP is per-NIC.** With asymmetric routing or multi-homed setups, traffic that ingresses on a NIC the daemon isn't attached to is unfiltered. `--iface` must match the actual ingress path; multiple ingress NICs need multiple daemons.
+- **Whitelist TTL trims idle players.** Default `TTL=10m` — every passed UDP packet refreshes it, but a player whose UDP stalls (loading screens, `/afk` mods that suspend traffic, transient packet loss longer than 10 minutes) drops out and resumes as `expired`. Tune `TTL` in `/etc/fivem-ebpf/config` to your worst-case idle gap.
+- **Don't restart while you're under attack.** All of the above gets worse: the wipe window is exactly when an attacker's UDP flood from non-whitelisted IPs would otherwise be dropped — but legitimate players' state is also gone, and they'll fight the attacker's traffic for handshake bandwidth on the way back in.
+- **Stale foreground `run` processes lie.** A `./bin/fivem-ebpf run` left in a tmux pane keeps maps pinned and the `fivem_attached=1` gauge true even after you `systemctl start fivem-ebpf`, masking that the service unit failed to attach. Prefer `systemd-run --unit=fivem-dbg` for debug runs, and check `pgrep -a fivem-ebpf` before assuming the unit is the live daemon.
+
 ## Troubleshooting
 
 - **`sockops: attach failed: permission denied`** — cgroup v2 not at `--cgroup` (default `/sys/fs/cgroup`). Check `mount | grep cgroup2`.
