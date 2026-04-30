@@ -1,4 +1,4 @@
-module github.com/sratabix/fivem-ebpf
+module github.com/sratabix/gameshield-ebpf
 
 go 1.22
 
@@ -6,6 +6,7 @@ require (
 	github.com/cilium/ebpf v0.17.3
 	github.com/prometheus/client_golang v1.20.5
 	golang.org/x/sys v0.30.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

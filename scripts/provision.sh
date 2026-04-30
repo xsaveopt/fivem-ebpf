@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Provision a Linux host (OrbStack VM, cloud VM, or bare metal) with the
-# toolchain needed to build fivem-ebpf from source. Idempotent — safe to
+# toolchain needed to build gameshield-ebpf from source. Idempotent — safe to
 # re-run.
 set -euo pipefail
 

@@ -1,0 +1,43 @@
+#ifndef __GAMESHIELD_FIVEM_STATS_H__
+#define __GAMESHIELD_FIVEM_STATS_H__
+
+enum fivem_stat {
+    FIVEM_STAT_PASS_TCP                       = 0,
+    FIVEM_STAT_PASS_UDP_WHITELISTED           = 1,
+    FIVEM_STAT_DROP_UDP_NOT_WHITELISTED       = 2,
+    FIVEM_STAT_DROP_UDP_EXPIRED               = 3,
+    FIVEM_STAT_DROP_MALFORMED                 = 4,
+    FIVEM_STAT_TCP_ESTABLISHED_INSERTS        = 5,
+    FIVEM_STAT_TCP_L7_PROMOTED                = 6,
+    FIVEM_STAT_TCP_L7_MATCH_NO_EST            = 7,
+    FIVEM_STAT_DROP_UDP_RATELIMIT             = 8,
+    FIVEM_STAT_DROP_TCP_INITCONNECT_RATELIMIT = 9,
+    FIVEM_STAT_DROP_UDP_ENET_MALFORMED        = 10,
+    FIVEM_STAT_DROP_UDP_UNHEALTHY             = 11,
+    FIVEM_STAT_TCP_POST_CLIENT_SEEN           = 12,
+    FIVEM_STAT_TCP_GETINFO_SEEN               = 13,
+    FIVEM_STAT_DROP_TCP_GETINFO_RATELIMIT     = 14,
+    FIVEM_STAT_DROP_TCP_BAD_USER_AGENT        = 15,
+    FIVEM_STAT_DROP_TCP_NO_SYN                = 16,
+    FIVEM_STAT_DROP_TCP_GLOBAL_RATELIMIT      = 17,
+    FIVEM_STAT_DROP_TCP_TOO_MANY_OPEN         = 18,
+    FIVEM_STAT_MAX                            = 19,
+};
+
+enum fivem_drop_reason {
+    FIVEM_DROP_TCP_NO_SYN                = 0,
+    FIVEM_DROP_TCP_TOO_MANY_OPEN         = 1,
+    FIVEM_DROP_TCP_GLOBAL_RATELIMIT      = 2,
+    FIVEM_DROP_TCP_BAD_USER_AGENT        = 3,
+    FIVEM_DROP_TCP_INITCONNECT_RATELIMIT = 4,
+    FIVEM_DROP_TCP_GETINFO_RATELIMIT     = 5,
+    FIVEM_DROP_MALFORMED                 = 6,
+    FIVEM_DROP_UDP_NOT_WHITELISTED       = 7,
+    FIVEM_DROP_UDP_EXPIRED               = 8,
+    FIVEM_DROP_UDP_UNHEALTHY             = 9,
+    FIVEM_DROP_UDP_ENET_MALFORMED        = 10,
+    FIVEM_DROP_UDP_RATELIMIT             = 11,
+    FIVEM_NUM_DROP_REASONS               = 12,
+};
+
+#endif

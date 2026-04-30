@@ -62,11 +62,11 @@ jobs:
           mkdir -p bin
           go build -trimpath \
             -ldflags "-s -w -X main.version=${GITHUB_SHA::7}" \
-            -o bin/fivem-ebpf \
-            ./cmd/fivem-ebpf
+            -o bin/gameshield \
+            ./cmd/gameshield
 
       - uses: actions/upload-artifact@v4
         with:
-          name: fivem-ebpf-linux-${{ matrix.goarch }}
-          path: bin/fivem-ebpf
+          name: gameshield-ebpf-linux-${{ matrix.goarch }}
+          path: bin/gameshield
           retention-days: 7
