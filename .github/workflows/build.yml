@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev \
+            clang llvm libbpf-dev libelf-dev zip \
             linux-headers-$(uname -r)
 
       - name: install bpftool
@@ -65,8 +65,28 @@ jobs:
             -o bin/gameshield \
             ./cmd/gameshield
 
+      - name: package dev zip
+        run: |
+          mkdir -p stage
+          cp bin/gameshield stage/
+          cp deploy/gameshield-ebpf.service stage/
+          cp deploy/config.example.yaml stage/
+          cp deploy/install.sh stage/
+          cp deploy/grafana/gameshield-dashboard.json stage/
+          cp deploy/grafana/gameshield-ips-dashboard.json stage/
+          chmod 0755 stage/gameshield stage/install.sh
+          ZIP="gameshield-ebpf-dev-linux-${{ matrix.goarch }}.zip"
+          (cd stage && zip -q "../$ZIP" \
+            gameshield \
+            gameshield-ebpf.service \
+            config.example.yaml \
+            install.sh \
+            gameshield-dashboard.json \
+            gameshield-ips-dashboard.json)
+          ls -l "$ZIP"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: gameshield-ebpf-linux-${{ matrix.goarch }}
-          path: bin/gameshield
-          retention-days: 7
+          name: gameshield-ebpf-dev-linux-${{ matrix.goarch }}
+          path: gameshield-ebpf-dev-linux-${{ matrix.goarch }}.zip
+          retention-days: 14
