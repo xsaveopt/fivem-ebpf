@@ -1,13 +1,9 @@
-// Package metrics holds the gameshield-level Prometheus collectors. Module-
-// specific metrics live in each module's package and are registered via
-// Module.Collectors().
 package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Core exposes attach state, build info, and per-module attach gauges.
 type Core struct {
 	version string
 	iface   string
@@ -23,8 +19,6 @@ type Core struct {
 	moduleGa  *prometheus.Desc
 }
 
-// NewCore builds the core collector. xdpAttached/sockopsAttached return the
-// dispatcher attach state; moduleAttached returns module-name → attached.
 func NewCore(version, iface, pinRoot, xdpMode string,
 	xdpAttached, sockopsAttached func() bool,
 	moduleAttached func() map[string]bool,

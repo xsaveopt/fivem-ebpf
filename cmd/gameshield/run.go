@@ -60,7 +60,6 @@ func cmdRun(args []string) {
 
 	reg := prometheus.NewRegistry()
 
-	// Module attach state — populated as modules come up.
 	var attachMu sync.RWMutex
 	moduleState := map[string]bool{}
 	moduleStateSnapshot := func() map[string]bool {
@@ -81,11 +80,9 @@ func cmdRun(args []string) {
 	)
 	reg.MustRegister(core_)
 
-	// HTTP mux with /metrics + per-module API routes.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
 
-	// Stable iteration order for deterministic startup logs.
 	enabled := cfg.EnabledModules()
 	sort.Strings(enabled)
 

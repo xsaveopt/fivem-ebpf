@@ -5,26 +5,23 @@ import (
 	"time"
 )
 
-// Config is the parsed `modules.fivem` subtree. Defaults match the values
-// the standalone fivem-ebpf binary used historically.
 type Config struct {
-	Port               uint16        `yaml:"port"`
-	WhitelistTTL       time.Duration `yaml:"whitelist_ttl"`
-	UDPRatePerSec      uint64        `yaml:"udp_rate_per_sec"`
-	UDPBurst           uint64        `yaml:"udp_burst"`
-	InitConnectPerMin  uint64        `yaml:"initconnect_per_min"`
-	InitConnectBurst   uint64        `yaml:"initconnect_burst"`
-	GetInfoPerMin      uint64        `yaml:"getinfo_per_min"`
-	GetInfoBurst       uint64        `yaml:"getinfo_burst"`
-	TCPGlobalRatePerS  uint64        `yaml:"tcp_global_rate_per_sec"` // 0 disables
-	TCPGlobalBurst     uint64        `yaml:"tcp_global_burst"`
-	TCPMaxOpenPerIP    uint64        `yaml:"tcp_max_open_per_ip"` // 0 disables
-	HealthWindow       time.Duration `yaml:"health_window"`
-	HealthThreshold    uint32        `yaml:"health_threshold"`
-	HealthBlacklist    time.Duration `yaml:"health_blacklist"`
+	Port              uint16        `yaml:"port"`
+	WhitelistTTL      time.Duration `yaml:"whitelist_ttl"`
+	UDPRatePerSec     uint64        `yaml:"udp_rate_per_sec"`
+	UDPBurst          uint64        `yaml:"udp_burst"`
+	InitConnectPerMin uint64        `yaml:"initconnect_per_min"`
+	InitConnectBurst  uint64        `yaml:"initconnect_burst"`
+	GetInfoPerMin     uint64        `yaml:"getinfo_per_min"`
+	GetInfoBurst      uint64        `yaml:"getinfo_burst"`
+	TCPGlobalRatePerS uint64        `yaml:"tcp_global_rate_per_sec"`
+	TCPGlobalBurst    uint64        `yaml:"tcp_global_burst"`
+	TCPMaxOpenPerIP   uint64        `yaml:"tcp_max_open_per_ip"`
+	HealthWindow      time.Duration `yaml:"health_window"`
+	HealthThreshold   uint32        `yaml:"health_threshold"`
+	HealthBlacklist   time.Duration `yaml:"health_blacklist"`
 }
 
-// defaults returns the historical fivem-ebpf settings.
 func defaults() Config {
 	return Config{
 		Port:              30120,
@@ -44,8 +41,6 @@ func defaults() Config {
 	}
 }
 
-// validate enforces the few invariants that aren't expressible at the
-// type level (e.g. burst > 0 if rate > 0).
 func (c *Config) validate() error {
 	if c.Port == 0 {
 		return fmt.Errorf("port must be > 0")

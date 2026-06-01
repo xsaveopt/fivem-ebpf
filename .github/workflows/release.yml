@@ -30,12 +30,6 @@ jobs:
             linux-headers-$(uname -r)
 
       - name: install bpftool
-        # Apt's bpftool is the linux-tools-common wrapper that dispatches to
-        # /usr/lib/linux-tools/<KVER>/bpftool. On hosted runners the kernel
-        # is azure-flavored and the matching linux-tools-<KVER>-azure
-        # package lags the kernel by weeks — the wrapper then errors with
-        # "bpftool not found for kernel <KVER>". Use the upstream static
-        # binary instead, pinned by SHA-256.
         run: |
           BPFTOOL_VERSION=v7.7.0
           BPFTOOL_SHA256=09150596f09356b0ff632dd7f9856e0ea86bf96b269e9bc94278d9a9432a268c

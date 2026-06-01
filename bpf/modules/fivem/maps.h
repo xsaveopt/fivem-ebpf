@@ -8,13 +8,6 @@
 #include "../../core/shared/drop_history.h"
 #include "stats.h"
 
-/*
- * Module-private maps. Pinned under /sys/fs/bpf/gameshield/modules/fivem/
- * by the userspace loader. Adding a stat slot or drop reason changes shape;
- * libbpf will refuse to reuse the old pin — `rm` it once and let the
- * loader recreate.
- */
-
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, __be32);

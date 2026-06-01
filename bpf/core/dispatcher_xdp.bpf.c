@@ -11,16 +11,6 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-/*
- * Core XDP dispatcher. Owns iface attachment; tail-calls into the per-module
- * XDP program based on (proto, dest_port). Falls through to XDP_PASS when
- * no module is bound or the tail call fails — fail-open is mandatory; the
- * box must not silently black-hole traffic when a module unloads.
- *
- * Modules implementing tail-callable XDP programs declare them with
- * SEC("xdp") and rely on userspace to write their FD into xdp_modules[id].
- */
-
 SEC("xdp")
 int gameshield_dispatch_xdp(struct xdp_md *ctx) {
     void *data     = (void *)(long)ctx->data;
@@ -51,7 +41,6 @@ int gameshield_dispatch_xdp(struct xdp_md *ctx) {
         return XDP_PASS;
 
     bpf_tail_call(ctx, &xdp_modules, *slot);
-    /* tail call only returns on failure (slot empty / out of range) — fail
-     * open. The dispatcher must not invent verdicts on its own. */
+    /* tail call only returns on failure (slot empty / out of range) — fail open */
     return XDP_PASS;
 }

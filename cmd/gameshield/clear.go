@@ -13,8 +13,6 @@ import (
 	"github.com/sratabix/gameshield-ebpf/internal/pinpath"
 )
 
-// cmdClear wipes shared per-IP core maps. Module-private maps need
-// `gameshield <module> clear-...` (not yet implemented; rare op).
 func cmdClear(args []string) {
 	fs := flag.NewFlagSet("clear", flag.ExitOnError)
 	pinRoot := fs.String("pin-root", pinpath.DefaultRoot, "gameshield bpf pin root")

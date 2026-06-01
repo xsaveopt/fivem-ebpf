@@ -13,8 +13,6 @@ import (
 	"github.com/sratabix/gameshield-ebpf/internal/pinpath"
 )
 
-// cmdHealth lists currently-blacklisted IPs from the shared udp_health map.
-// --all also shows IPs accumulating anomalies but not yet over the threshold.
 func cmdHealth(args []string) {
 	fs := flag.NewFlagSet("health", flag.ExitOnError)
 	pinRoot := fs.String("pin-root", pinpath.DefaultRoot, "gameshield bpf pin root")

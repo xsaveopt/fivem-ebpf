@@ -1,8 +1,5 @@
 package fivem
 
-// StatLabels mirrors enum fivem_stat in bpf/modules/fivem/stats.h. The slot
-// number is the index in this slice; growing the BPF enum requires
-// appending here in lockstep.
 var StatLabels = []string{
 	"pass_tcp",
 	"pass_udp_whitelisted",
@@ -25,7 +22,6 @@ var StatLabels = []string{
 	"drop_tcp_too_many_open",
 }
 
-// Slot indices (must match enum fivem_stat in stats.h).
 const (
 	StatPassTCP                     = 0
 	StatPassUDPWhitelisted          = 1
@@ -48,8 +44,6 @@ const (
 	StatDropTCPTooManyOpen          = 18
 )
 
-// DropReasonNames mirrors enum fivem_drop_reason in stats.h. Index = reason
-// slot in fivem_drop_history.counts[].
 var DropReasonNames = [12]string{
 	"tcp_no_syn",
 	"tcp_too_many_open",

@@ -17,7 +17,6 @@ import (
 
 const Name = "fivem"
 
-// Module is the FiveM implementation of module.Module.
 type Module struct {
 	cfg       Config
 	xdpObj    *fivemXDPObjects
@@ -25,7 +24,6 @@ type Module struct {
 	collector *collector
 }
 
-// New returns an unconfigured FiveM module. Configure must be called before Load.
 func New() *Module {
 	return &Module{cfg: defaults()}
 }
@@ -83,10 +81,6 @@ func (m *Module) Load(loaded *core.Loaded, pinPath string) error {
 		return fmt.Errorf("load sockops spec: %w", err)
 	}
 
-	// Sockops references whatever subset of shared + private maps its
-	// included headers pull in. Build a candidate set, then filter to maps
-	// actually present in the spec — cilium/ebpf rejects replacements for
-	// undeclared maps.
 	candidates := loaded.SharedMapReplacements()
 	candidates["fivem_stats"] = xobj.FivemStats
 	candidates["fivem_drop_history"] = xobj.FivemDropHistory
@@ -183,8 +177,6 @@ func (m *Module) Sockops() *ebpf.Program {
 	return m.soObj.GameshieldFivemSockops
 }
 
-// Maps returns the module-private maps as a Maps struct (used by collectors,
-// CLI subcommands, HTTP handlers).
 func (m *Module) Maps() Maps {
 	if m.xdpObj == nil {
 		return Maps{}
@@ -197,9 +189,6 @@ func (m *Module) Maps() Maps {
 	}
 }
 
-// SharedMaps returns the shared maps as the FiveM module sees them (same
-// FDs as core.Loaded). Convenience for module-scoped CLI subcommands and
-// /api routes that need to read these.
 func (m *Module) SharedMaps() SharedMaps {
 	if m.xdpObj == nil {
 		return SharedMaps{}
@@ -264,7 +253,6 @@ func (m *Module) closeXDP() {
 	}
 }
 
-// Maps is the module-private map set.
 type Maps struct {
 	Stats       *ebpf.Map
 	DropHistory *ebpf.Map
@@ -272,7 +260,6 @@ type Maps struct {
 	GetinfoRL   *ebpf.Map
 }
 
-// SharedMaps is the shared core map set as visible from this module.
 type SharedMaps struct {
 	TCPEstablished *ebpf.Map
 	TCPSynSeen     *ebpf.Map

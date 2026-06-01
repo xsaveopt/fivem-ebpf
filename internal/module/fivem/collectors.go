@@ -21,16 +21,16 @@ func bootTimeNS() uint64 {
 const metricNamespace = "gameshield_fivem"
 
 type mapSizes struct {
-	whitelist    atomic.Int64
-	established  atomic.Int64
-	synSeen      atomic.Int64
-	openCount    atomic.Int64
-	udpRL        atomic.Int64
-	initcRL      atomic.Int64
-	getinfoRL    atomic.Int64
-	health       atomic.Int64
-	dropHistory  atomic.Int64
-	blacklisted  atomic.Int64
+	whitelist   atomic.Int64
+	established atomic.Int64
+	synSeen     atomic.Int64
+	openCount   atomic.Int64
+	udpRL       atomic.Int64
+	initcRL     atomic.Int64
+	getinfoRL   atomic.Int64
+	health      atomic.Int64
+	dropHistory atomic.Int64
+	blacklisted atomic.Int64
 }
 
 type collector struct {
@@ -94,9 +94,6 @@ func newCollector(m *Module) *collector {
 	}
 }
 
-// StartSizeTicker refreshes map-size gauges at the given interval. Cancel
-// via the context. Iterating 100k-entry LRU maps every Prometheus scrape
-// is too expensive — this background ticker amortizes the cost.
 func (c *collector) StartSizeTicker(ctx context.Context, interval time.Duration) {
 	go func() {
 		c.refreshSizes()

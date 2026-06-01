@@ -8,13 +8,6 @@
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
 
-/*
- * Parse eth → IPv4 → L4 from an XDP context with explicit bounds checks at
- * each step. On success returns 0 with *out_ip and *out_l4 pointing into
- * packet data; caller still has to widen-bound-check before dereferencing
- * the L4 header itself. Returns non-zero on malformed/truncated frames or
- * non-IPv4 / unsupported protocol — caller should XDP_PASS in that case.
- */
 struct parsed_l3l4 {
     struct iphdr  *ip;
     void          *l4;

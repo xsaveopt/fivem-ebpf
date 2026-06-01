@@ -10,12 +10,6 @@ struct udp_health {
     __u64 blacklist_until_ns;
 };
 
-/*
- * Anomaly-driven blacklist. Modules call health_record_anomaly() when a
- * packet looks structurally invalid for their protocol; once an IP exceeds
- * `threshold` anomalies inside `window_ns`, it is blacklisted for
- * `blacklist_ns`. health_is_blacklisted() is a cheap read for the fast path.
- */
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, __be32);

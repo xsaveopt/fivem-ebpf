@@ -15,9 +15,6 @@ import (
 	"github.com/sratabix/gameshield-ebpf/internal/pinpath"
 )
 
-// subcommands returns FiveM-scoped CLI verbs. Each opens the pinned maps
-// directly so they work whether or not the daemon is running, mirroring
-// the standalone fivem-ebpf tool.
 func subcommands() []module.Subcommand {
 	return []module.Subcommand{
 		{

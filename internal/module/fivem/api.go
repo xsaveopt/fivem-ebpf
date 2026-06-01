@@ -22,9 +22,6 @@ func ipv4Str(key [4]byte) string {
 	return net.IPv4(key[0], key[1], key[2], key[3]).String()
 }
 
-// registerAPI wires module-specific HTTP endpoints onto mux under prefix
-// (e.g. /api/fivem/). Generic shared-map endpoints (whitelist, blacklist,
-// ...) are owned by the daemon, not the module.
 func registerAPI(mux *http.ServeMux, prefix string, m *Module) {
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"

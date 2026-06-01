@@ -11,31 +11,21 @@ import (
 	"github.com/cilium/ebpf/link"
 )
 
-// PinPath returns the on-disk pin directory for a sub-namespace under the
-// gameshield root (typically "/sys/fs/bpf/gameshield"). The dispatcher and
-// shared maps live under <root>/core; per-module maps live under
-// <root>/modules/<name>.
 func PinPath(root, sub string) string {
 	return filepath.Join(root, sub)
 }
 
-// Options describes the dispatcher's runtime parameters. All paths and the
-// interface must be set; nothing here is module-specific.
 type Options struct {
 	Iface      string
 	CgroupPath string
-	PinRoot    string // e.g. /sys/fs/bpf/gameshield
+	PinRoot    string
 }
 
-// Loaded is the dispatcher load result. The shared maps are owned here and
-// passed by reference to module loaders via MapReplacements so module BPF
-// programs share the same map FDs as the dispatcher.
 type Loaded struct {
 	XDPLink     link.Link
 	SockopsLink link.Link
 	XDPMode     string
 
-	// Shared maps that all modules read/write.
 	TCPEstablished     *ebpf.Map
 	TCPSynSeen         *ebpf.Map
 	TCPWhitelist       *ebpf.Map
@@ -44,10 +34,9 @@ type Loaded struct {
 	UDPRatelimit       *ebpf.Map
 	UDPHealth          *ebpf.Map
 
-	// Dispatcher-only routing tables.
-	XDPModules     *ebpf.Map // PROG_ARRAY: slot → module XDP prog FD
-	SockopsModules *ebpf.Map // PROG_ARRAY: slot → module sockops prog FD
-	PortRouter     *ebpf.Map // (proto<<16|host_port) → module slot
+	XDPModules     *ebpf.Map
+	SockopsModules *ebpf.Map
+	PortRouter     *ebpf.Map
 }
 
 func (l *Loaded) Close() error {
@@ -74,9 +63,6 @@ func (l *Loaded) Close() error {
 	return errors.Join(errs...)
 }
 
-// Load brings up the dispatcher: pins shared maps, creates prog_arrays and
-// port_router, attaches XDP to the iface (native → generic fallback) and
-// sock_ops to cgroup v2 root.
 func Load(opts Options) (*Loaded, error) {
 	ifc, err := net.InterfaceByName(opts.Iface)
 	if err != nil {
@@ -113,9 +99,6 @@ func Load(opts Options) (*Loaded, error) {
 		return nil, fmt.Errorf("load sockops dispatcher spec: %w", err)
 	}
 	sobj := &dispatcherSockopsObjects{}
-	// sockops dispatcher only declares the routing maps; reuse the ones
-	// just created by the XDP dispatcher load via MapReplacements so we
-	// don't end up with duplicate prog_arrays.
 	if err := sspec.LoadAndAssign(sobj, &ebpf.CollectionOptions{
 		MapReplacements: map[string]*ebpf.Map{
 			"xdp_modules":     xobj.XdpModules,
@@ -157,9 +140,6 @@ func Load(opts Options) (*Loaded, error) {
 	}, nil
 }
 
-// SharedMapReplacements returns the MapReplacements map a module loader
-// passes to LoadAndAssign so the module's BPF program shares map FDs with
-// the dispatcher rather than creating its own.
 func (l *Loaded) SharedMapReplacements() map[string]*ebpf.Map {
 	return map[string]*ebpf.Map{
 		"tcp_established":      l.TCPEstablished,
@@ -172,7 +152,6 @@ func (l *Loaded) SharedMapReplacements() map[string]*ebpf.Map {
 	}
 }
 
-// Proto identifies an L4 protocol for port_router keys.
 type Proto uint8
 
 const (
@@ -191,26 +170,20 @@ func (p Proto) String() string {
 	}
 }
 
-// PortBinding tells the dispatcher to route (proto, port) to a module slot.
 type PortBinding struct {
 	Proto Proto
-	Port  uint16 // host order
+	Port  uint16
 }
 
 func (b PortBinding) routerKey() uint32 {
 	return (uint32(b.Proto) << 16) | uint32(b.Port)
 }
 
-// RegisterXDP places a module's XDP program FD in xdp_modules[slot].
 func (l *Loaded) RegisterXDP(slot uint32, prog *ebpf.Program) error {
 	fd := uint32(prog.FD())
 	return l.XDPModules.Update(slot, fd, ebpf.UpdateAny)
 }
 
-// RegisterSockops places a module's sock_ops program FD in
-// sockops_modules[slot]. Pass nil to skip — modules without sockops behavior
-// (Minecraft Bedrock, ...) leave the slot empty; the dispatcher's tail call
-// will fall through harmlessly.
 func (l *Loaded) RegisterSockops(slot uint32, prog *ebpf.Program) error {
 	if prog == nil {
 		return nil
@@ -219,7 +192,6 @@ func (l *Loaded) RegisterSockops(slot uint32, prog *ebpf.Program) error {
 	return l.SockopsModules.Update(slot, fd, ebpf.UpdateAny)
 }
 
-// BindPorts writes (proto, port) → slot entries to port_router.
 func (l *Loaded) BindPorts(slot uint32, ports []PortBinding) error {
 	for _, b := range ports {
 		key := b.routerKey()
@@ -230,8 +202,6 @@ func (l *Loaded) BindPorts(slot uint32, ports []PortBinding) error {
 	return nil
 }
 
-// UnbindPorts removes the given (proto, port) entries from port_router and
-// clears slot from both prog_arrays. Used at module teardown.
 func (l *Loaded) UnbindPorts(slot uint32, ports []PortBinding) {
 	for _, b := range ports {
 		key := b.routerKey()
@@ -241,9 +211,6 @@ func (l *Loaded) UnbindPorts(slot uint32, ports []PortBinding) {
 	_ = l.SockopsModules.Delete(slot)
 }
 
-// SetVar writes a value into a .rodata variable on a module's spec, before
-// LoadAndAssign. Returns nil if the variable doesn't exist (treat as
-// optional knob).
 func SetVar(spec *ebpf.CollectionSpec, name string, value any) error {
 	v, ok := spec.Variables[name]
 	if !ok {

@@ -13,13 +13,8 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-/*
- * FiveM-specific tunables. The core dispatcher already gates by
- * (proto, port) so target_port is not needed here. All other knobs are set
- * from userspace via .rodata at load time.
- */
 volatile const __u64 whitelist_ttl_ns         = 600ULL * 1000000000ULL;
-volatile const __u64 udp_refill_period_ns     = 666666ULL;        /* ~1500 pkt/s */
+volatile const __u64 udp_refill_period_ns     = 666666ULL;
 volatile const __u64 udp_burst                = 4500;
 volatile const __u64 initconnect_period_ns    = 10000000000ULL;
 volatile const __u64 initconnect_burst        = 3;
@@ -32,7 +27,6 @@ volatile const __u64 health_window_ns         = 10ULL * 1000000000ULL;
 volatile const __u32 health_threshold         = 20;
 volatile const __u64 health_blacklist_ns      = 300ULL * 1000000000ULL;
 
-/* ENet protocol constants (from enet/protocol.h) */
 #define ENET_HEADER_FLAG_SENT_TIME       0x8000
 #define ENET_HEADER_FLAG_COMPRESSED      0x4000
 #define ENET_HEADER_FLAG_MASK            0xC000
@@ -48,15 +42,8 @@ volatile const __u64 health_blacklist_ns      = 300ULL * 1000000000ULL;
 #define ENET_CMD_TYPE_MIN 1
 #define ENET_CMD_TYPE_MAX 12
 
-/*
- * Scan the first UA_SCAN_BYTES of the TCP payload for "CitizenFX":
- *   UA_VALID   — "CitizenFX/" (real client form)
- *   UA_BOT     — "CitizenFX\r" (bot fingerprint observed in real captures)
- *   UA_UNKNOWN — anything else
- *
- * Folded into one unrolled pass instead of two — two full-width unrolled
- * scans hit the 1M-instruction verifier limit. Don't split it back out.
- */
+/* One unrolled pass, not two — two full-width unrolled scans hit the
+ * 1M-instruction verifier limit. Don't split it back out. */
 #define UA_SCAN_BYTES 128
 #define UA_NEEDLE_LEN 10
 #define UA_SCAN_POSITIONS (UA_SCAN_BYTES - UA_NEEDLE_LEN + 1)
@@ -91,10 +78,6 @@ static __always_inline int match_post_client(void *payload, void *data_end) {
             p[8] == 'i' && p[9] == 'e' && p[10] == 'n' && p[11] == 't');
 }
 
-/*
- * Match /info.json, /dynamic.json, /players.json — the amplification
- * vectors. All return multi-KB JSON; per-IP rate-limited.
- */
 static __always_inline int match_get_endpoint(void *payload, void *data_end) {
     unsigned char *p = payload;
     if ((void *)(p + 15) > data_end)
@@ -139,11 +122,8 @@ static __always_inline bool enet_looks_valid(void *payload, void *data_end) {
     return true;
 }
 
-/*
- * idTech-style out-of-band packets: 4×0xff + ASCII command. Real FiveM
- * clients send these as the first UDP packet; ENet structural check would
- * false-positive on them.
- */
+/* idTech OOB (4×0xff): real FiveM clients send these as the first UDP packet;
+ * the ENet structural check would false-positive on them. */
 static __always_inline bool is_oob_prefix(void *payload, void *data_end) {
     unsigned char *p = payload;
     if ((void *)(p + 4) > data_end)
@@ -167,8 +147,6 @@ int gameshield_fivem_xdp(struct xdp_md *ctx) {
         if ((void *)(tcp + 1) > data_end)
             return XDP_PASS;
 
-        /* Whitelisted IPs — fast path. Refresh timestamp so an active TCP
-         * session keeps the entry alive without depending on UDP refresh. */
         __u64 *wl = bpf_map_lookup_elem(&tcp_whitelist, &src);
         if (wl) {
             *wl = bpf_ktime_get_boot_ns();
@@ -176,9 +154,6 @@ int gameshield_fivem_xdp(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        /* iptables equivalent:
-         *   -A INPUT -p tcp --dport 30120 -m conntrack --ctstate NEW ! --syn -j DROP
-         */
         if (!tcp->syn) {
             if (!bpf_map_lookup_elem(&tcp_syn_seen, &src) &&
                 !bpf_map_lookup_elem(&tcp_established, &src)) {
@@ -195,9 +170,8 @@ int gameshield_fivem_xdp(struct xdp_md *ctx) {
                     return XDP_DROP;
                 }
             }
-            /* Global circuit breaker on NEW connections only. Applied to
-             * every TCP packet was sheding asset-download traffic during
-             * floods and breaking legit player joins. */
+            /* NEW connections only — applying to every TCP packet shed
+             * asset-download traffic during floods and broke legit joins. */
             if (!ratelimit_take_percpu(&tcp_global_ratelimit,
                                        tcp_global_period_ns, tcp_global_burst)) {
                 fivem_drop_history_record(src, FIVEM_DROP_TCP_GLOBAL_RATELIMIT);
@@ -223,8 +197,7 @@ int gameshield_fivem_xdp(struct xdp_md *ctx) {
         if (!is_post && !is_getinfo)
             return XDP_PASS;
 
-        /* Drop bot UA before consuming rate-limit tokens — otherwise the
-         * drop itself is a probe vector. */
+        /* Drop bot UA before consuming rate-limit tokens — else the drop is a probe vector. */
         enum ua_result ua = scan_user_agent(payload, data_end);
         if (ua == UA_BOT) {
             fivem_drop_history_record(src, FIVEM_DROP_TCP_BAD_USER_AGENT);
@@ -255,7 +228,6 @@ int gameshield_fivem_xdp(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        /* is_getinfo */
         STAT_BUMP(fivem_stats, FIVEM_STAT_TCP_GETINFO_SEEN);
 
         if (!ratelimit_take(&getinfo_ratelimit, src,

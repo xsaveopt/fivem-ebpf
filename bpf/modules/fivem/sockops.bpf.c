@@ -11,20 +11,8 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-/*
- * FiveM sock_ops handler. Tail-called by the core dispatcher when
- * skops->local_port matches a port owned by this module. Responsibilities:
- *   - PASSIVE_ESTABLISHED → record src in tcp_established, bump open_count
- *   - STATE_CB → CLOSE → decrement open_count
- *
- * Accepts AF_INET (pure v4) and AF_INET6 (dual-stack v4-mapped — kernel
- * populates remote_ip4 for both). Pure-v6 sockets set remote_ip4=0; skip
- * those until v6 support lands.
- *
- * Array-indexed access skops->remote_ip6[3] trips the kernel's
- * "dereference of modified ctx ptr" verifier check. We rely on remote_ip4
- * exclusively, the supported direct-field path.
- */
+/* remote_ip6[3] array indexing trips the verifier's "dereference of modified
+ * ctx ptr" check — use remote_ip4 directly (set for v4 and v4-mapped-v6). */
 
 SEC("sockops")
 int gameshield_fivem_sockops(struct bpf_sock_ops *skops) {

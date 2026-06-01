@@ -34,7 +34,6 @@ func main() {
 	case "-h", "--help", "help":
 		usage()
 	default:
-		// Module-scoped subcommand: `gameshield <module> <verb> [args]`
 		if len(args) >= 1 {
 			if dispatchModuleSubcommand(os.Args[1], args[0], args[1:]) {
 				return
@@ -45,8 +44,6 @@ func main() {
 	}
 }
 
-// dispatchModuleSubcommand looks up `<modName> <verb>` against the registry.
-// Returns true if it ran a subcommand (success or failure handled inside).
 func dispatchModuleSubcommand(modName, verb string, args []string) bool {
 	m, err := module.New(modName)
 	if err != nil {

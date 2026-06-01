@@ -1,4 +1,3 @@
-// Package config loads the gameshield YAML config file.
 package config
 
 import (
@@ -9,7 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Daemon holds top-level options that don't live under any module.
 type Daemon struct {
 	Iface           string        `yaml:"iface"`
 	CgroupPath      string        `yaml:"cgroup_path"`
@@ -18,8 +16,6 @@ type Daemon struct {
 	MapSizeInterval time.Duration `yaml:"map_size_interval"`
 }
 
-// Config is the parsed file. Modules is intentionally untyped — the daemon
-// passes each subtree to the corresponding module's Configure() to decode.
 type Config struct {
 	Daemon  Daemon                    `yaml:",inline"`
 	Modules map[string]map[string]any `yaml:"modules"`
@@ -38,7 +34,6 @@ func defaults() Config {
 	}
 }
 
-// Load reads and parses the YAML config file. Missing fields take defaults.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -66,7 +61,6 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// ModuleEnabled returns whether the named module's subtree has enabled: true.
 func (c *Config) ModuleEnabled(name string) bool {
 	sec, ok := c.Modules[name]
 	if !ok {
@@ -76,8 +70,6 @@ func (c *Config) ModuleEnabled(name string) bool {
 	return enabled
 }
 
-// EnabledModules returns names of modules with enabled: true. Order is not
-// guaranteed; caller should sort if stable iteration matters.
 func (c *Config) EnabledModules() []string {
 	out := make([]string, 0, len(c.Modules))
 	for name := range c.Modules {

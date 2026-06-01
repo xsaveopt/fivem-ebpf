@@ -6,19 +6,6 @@
 
 #include "ratelimit.h"
 
-/*
- * Core per-IP TCP state. Shared across modules — the (src_ip, dest_port)
- * tuple disambiguates which module's traffic an entry belongs to, but for
- * cheap lookups the maps are keyed only by src_ip and modules read whatever
- * the most recent observation was. This is fine because:
- *   - tcp_established / tcp_syn_seen are advisory (drop heuristics on cold
- *     IPs), not security-critical
- *   - tcp_whitelist is per-IP "this IP completed a real handshake somewhere
- *     we trust"; if a host runs both FiveM and Minecraft and an IP joined
- *     either, treating it as known-good for both is correct
- *   - tcp_open_count is aggregated across modules — equally fine.
- */
-
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, __be32);

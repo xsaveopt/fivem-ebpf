@@ -13,8 +13,6 @@ import (
 	"github.com/sratabix/gameshield-ebpf/internal/pinpath"
 )
 
-// cmdDump dumps shared per-IP core maps. Module-private maps go through
-// `gameshield <module> dump-...` instead.
 func cmdDump(args []string) {
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
 	pinRoot := fs.String("pin-root", pinpath.DefaultRoot, "gameshield bpf pin root")

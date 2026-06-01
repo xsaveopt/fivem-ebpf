@@ -1,14 +1,4 @@
 #!/bin/sh
-# gameshield-ebpf installer.
-#
-# Usage:
-#   unzip the release zip, cd into it, then `sudo sh install.sh`.
-#
-# Handles fresh installs and upgrades: stops a running daemon, wipes pinned
-# BPF maps (their shapes can change between releases — libbpf refuses to
-# reuse a stale pin), installs new files, leaves an existing
-# /etc/gameshield/config.yaml untouched, and restarts the service if it was
-# running before.
 set -eu
 
 PREFIX="${PREFIX:-/usr/local}"
@@ -36,13 +26,11 @@ case "$(uname -s)" in
   *) echo "gameshield-ebpf only runs on Linux (current: $(uname -s))" >&2; exit 1 ;;
 esac
 
-# Kernel BTF (CO-RE)
 [ -e /sys/kernel/btf/vmlinux ] || {
   echo "kernel BTF missing at /sys/kernel/btf/vmlinux — need CONFIG_DEBUG_INFO_BTF=y" >&2
   exit 1
 }
 
-# Kernel >= 5.17 (bpf_loop)
 kmajor=$(uname -r | cut -d. -f1)
 kminor=$(uname -r | cut -d. -f2)
 if [ "$kmajor" -lt 5 ] || { [ "$kmajor" -eq 5 ] && [ "$kminor" -lt 17 ]; }; then
@@ -50,7 +38,6 @@ if [ "$kmajor" -lt 5 ] || { [ "$kmajor" -eq 5 ] && [ "$kminor" -lt 17 ]; }; then
   exit 1
 fi
 
-# cgroup v2
 if ! [ -e /sys/fs/cgroup/cgroup.controllers ]; then
   echo "cgroup v2 not mounted at /sys/fs/cgroup" >&2
   exit 1
@@ -63,8 +50,6 @@ if $SUDO systemctl is-active --quiet gameshield-ebpf 2>/dev/null; then
   $SUDO systemctl stop gameshield-ebpf
 fi
 
-# Migrate legacy fivem-ebpf install in place — pre-rename users coming via
-# upgrade need their old pins cleared.
 if $SUDO systemctl is-enabled --quiet fivem-ebpf 2>/dev/null; then
   echo "disabling legacy fivem-ebpf unit (replaced by gameshield-ebpf)"
   $SUDO systemctl disable --now fivem-ebpf || true

@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// decodeConfig copies values from the YAML-decoded raw map into a typed
-// Config. We don't use yaml.Unmarshal directly because the daemon receives
-// the full config and hands each module its already-decoded subtree as a
-// generic map[string]any.
 func decodeConfig(raw map[string]any, out *Config) error {
 	for k, v := range raw {
 		switch k {
@@ -97,7 +93,6 @@ func decodeConfig(raw map[string]any, out *Config) error {
 			}
 			out.HealthBlacklist = d
 		case "enabled":
-			// handled at the daemon level, ignored here
 		default:
 			return fmt.Errorf("unknown key: %s", k)
 		}

@@ -4,19 +4,6 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
-/*
- * Per-module per-IP drop history. The number of drop reasons is module-
- * specific, so each module declares its own map + value-shape via
- * DEFINE_DROP_HISTORY_MAP(name, num_reasons). The macro also defines a
- * record_drop helper bound to that map.
- *
- * Pinning by name means adding a reason changes the value shape and libbpf
- * will refuse to reuse the existing pin — but that's now scoped to one
- * module instead of forcing a global map nuke. Caller must `rm
- * /sys/fs/bpf/gameshield/modules/<name>/<map>` once after a reason is
- * added; covered in README upgrade notes.
- */
-
 #define DEFINE_DROP_HISTORY_MAP(NAME, NUM_REASONS)                              \
     struct NAME##_value {                                                       \
         __u64 first_drop_ns;                                                    \
