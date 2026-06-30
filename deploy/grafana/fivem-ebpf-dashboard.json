@@ -1,0 +1,698 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus instance scraping fivem-ebpf /metrics",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"},
+    {"type": "panel", "id": "stat", "name": "Stat", "version": ""},
+    {"type": "panel", "id": "timeseries", "name": "Time series", "version": ""}
+  ],
+  "annotations": {"list": []},
+  "description": "fivem-ebpf XDP filter — verdict counters, drop reasons, join funnel, map capacity, blacklist.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "XDP",
+      "description": "1 = XDP program attached to NIC. 0 = daemon down or attach failed.",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_attached{program=\"xdp\"})",
+          "refId": "A",
+          "legendFormat": "xdp",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "DETACHED", "color": "red", "index": 0},
+                "1": {"text": "ATTACHED", "color": "green", "index": 1}
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Sockops",
+      "description": "1 = sockops program attached to cgroup. Required to populate tcp_established on 3WHS completion.",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_attached{program=\"sockops\"})",
+          "refId": "A",
+          "legendFormat": "sockops",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "DETACHED", "color": "red", "index": 0},
+                "1": {"text": "ATTACHED", "color": "green", "index": 1}
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Blacklisted IPs (now)",
+      "description": "IPs currently in the udp_health blacklist. Each represents an IP whose UDP packets repeatedly failed ENet structural validation.",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_health_blacklisted_ips)",
+          "refId": "A",
+          "legendFormat": "blacklisted",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "orange", "value": 50},
+              {"color": "red", "value": 500}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "TCP Whitelist (now)",
+      "description": "IPs currently whitelisted for UDP. Promoted after CitizenFX/1 POST /client over a TCP connection that completed 3WHS.",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_map_entries{map=\"tcp_whitelist\"})",
+          "refId": "A",
+          "legendFormat": "whitelist",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "blue", "value": null},
+              {"color": "yellow", "value": 80000},
+              {"color": "red", "value": 95000}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Drops/sec",
+      "description": "All XDP drops per second across both protocols and all reasons.",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum(rate(fivem_xdp_packets_total{verdict=\"drop\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "drops",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "orange", "value": 1000},
+              {"color": "red", "value": 10000}
+            ]
+          },
+          "unit": "suffix:p/s",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Pass/sec",
+      "description": "All XDP passes per second (legitimate traffic to FXServer).",
+      "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum(rate(fivem_xdp_packets_total{verdict=\"pass\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "passes",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "green"},
+          "unit": "suffix:p/s",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Throughput by verdict & proto",
+      "description": "Stacked packet rates split by verdict (pass/drop) and protocol. Drop spikes here are the first attack signal.",
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum by (verdict, proto) (rate(fivem_xdp_packets_total[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{verdict}} {{proto}}",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 30,
+            "stacking": {"mode": "normal", "group": "A"},
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "suffix:p/s",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "drop tcp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "drop udp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "pass tcp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "pass udp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "TCP drops by reason",
+      "description": "global_ratelimit = circuit breaker firing (aggregate cap exceeded — sacrifices joins to keep server up). no_syn = ACK/FIN/RST flood (iptables-style). initconnect_ratelimit = POST /client spam. getinfo_ratelimit = /info.json amplification scrape. bad_user_agent = bare CitizenFX bot fingerprint.",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(fivem_xdp_packets_total{verdict=\"drop\",proto=\"tcp\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{reason}}",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 40,
+            "stacking": {"mode": "normal", "group": "A"},
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "suffix:p/s",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "global_ratelimit"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "super-light-red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "no_syn"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "bad_user_agent"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "purple"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "initconnect_ratelimit"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "getinfo_ratelimit"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "sum"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "UDP drops by reason",
+      "description": "not_whitelisted = packet from IP that never did the L7 handshake. enet_malformed = bad ENet structure (bot or buggy client). unhealthy = blacklisted from too many anomalies. ratelimit = per-IP UDP cap. expired = whitelist TTL elapsed.",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(fivem_xdp_packets_total{verdict=\"drop\",proto=\"udp\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{reason}}",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 40,
+            "stacking": {"mode": "normal", "group": "A"},
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "suffix:p/s",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "not_whitelisted"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "enet_malformed"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "unhealthy"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "semi-dark-red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "ratelimit"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "expired"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "malformed"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "purple"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "sum"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Join funnel",
+      "description": "Lifecycle of a real player connect: getinfo_seen → post_client_seen → established_inserts → l7_promoted. l7_match_no_established trending up means POST /client arrived from an IP whose 3WHS sockops never recorded — usually spoof attempts or sockops attach race.",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "rate(fivem_tcp_getinfo_seen_total[$__rate_interval])",
+          "refId": "A",
+          "legendFormat": "getinfo_seen",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "rate(fivem_tcp_post_client_seen_total[$__rate_interval])",
+          "refId": "B",
+          "legendFormat": "post_client_seen",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "rate(fivem_tcp_established_inserts_total[$__rate_interval])",
+          "refId": "C",
+          "legendFormat": "established_inserts",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "rate(fivem_tcp_l7_promoted_total[$__rate_interval])",
+          "refId": "D",
+          "legendFormat": "l7_promoted",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "rate(fivem_tcp_l7_match_no_established_total[$__rate_interval])",
+          "refId": "E",
+          "legendFormat": "l7_match_no_established",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineWidth": 2
+          },
+          "unit": "suffix:ev/s",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "l7_match_no_established"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}},
+              {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Drop ratio",
+      "description": "Drops as a fraction of total packets, per protocol. Useful for catching slow-burn attacks where absolute pps doesn't change much but the mix shifts.",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum by (proto) (rate(fivem_xdp_packets_total{verdict=\"drop\"}[$__rate_interval])) / clamp_min(sum by (proto) (rate(fivem_xdp_packets_total[$__rate_interval])), 1)",
+          "refId": "A",
+          "legendFormat": "{{proto}}",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "tcp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "udp"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Map sizes",
+      "description": "Entries per pinned LRU map (cap 100k each). If any map approaches the cap, legitimate IPs may be evicted under attack and real users get degraded service.",
+      "gridPos": {"x": 0, "y": 28, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max by (map) (fivem_map_entries)",
+          "refId": "A",
+          "legendFormat": "{{map}}",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineWidth": 2,
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "unit": "short",
+          "color": {"mode": "palette-classic"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "transparent", "value": null},
+              {"color": "red", "value": 100000}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Health blacklist",
+      "description": "blacklisted = IPs whose UDP packets repeatedly failed ENet validation, currently dropped. health_total = all IPs the daemon has tracked anomaly counts for (may exceed blacklisted because most never trip the threshold).",
+      "gridPos": {"x": 0, "y": 36, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_health_blacklisted_ips)",
+          "refId": "A",
+          "legendFormat": "blacklisted",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "max(fivem_map_entries{map=\"udp_health\"})",
+          "refId": "B",
+          "legendFormat": "health_total",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 30,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineWidth": 2
+          },
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "blacklisted"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "health_total"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Per-IP state populations",
+      "description": "How many distinct IPs are currently tracked in each per-IP map. A sudden surge in tcp_syn_seen with no matching established suggests a SYN flood. Established without matching whitelist suggests scanners doing 3WHS but never POST /client.",
+      "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "max(fivem_map_entries{map=\"tcp_syn_seen\"})",
+          "refId": "A",
+          "legendFormat": "tcp_syn_seen",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "max(fivem_map_entries{map=\"tcp_established\"})",
+          "refId": "B",
+          "legendFormat": "tcp_established",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        },
+        {
+          "expr": "max(fivem_map_entries{map=\"tcp_whitelist\"})",
+          "refId": "C",
+          "legendFormat": "tcp_whitelist",
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineWidth": 2
+          },
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["fivem", "ebpf", "ddos", "xdp"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "fivem-ebpf",
+  "uid": "fivem-ebpf",
+  "version": 1,
+  "weekStart": ""
+}

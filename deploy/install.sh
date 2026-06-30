@@ -3,9 +3,8 @@ set -eu
 
 PREFIX="${PREFIX:-/usr/local}"
 SYSD_DIR="${SYSD_DIR:-/etc/systemd/system}"
-ETC_DIR="${ETC_DIR:-/etc/gameshield}"
-PIN_DIR="${PIN_DIR:-/sys/fs/bpf/gameshield}"
-LEGACY_PIN_DIR="${LEGACY_PIN_DIR:-/sys/fs/bpf/fivem}"
+ETC_DIR="${ETC_DIR:-/etc/fivem-ebpf}"
+PIN_DIR="${PIN_DIR:-/sys/fs/bpf/fivem}"
 GRAFANA_DIR="${GRAFANA_DIR:-$ETC_DIR/grafana}"
 
 SUDO=""
@@ -13,8 +12,8 @@ SUDO=""
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 
-for f in gameshield gameshield-ebpf.service config.example.yaml \
-         gameshield-dashboard.json gameshield-ips-dashboard.json; do
+for f in fivem-ebpf fivem-ebpf.service config.example \
+         fivem-ebpf-dashboard.json fivem-ebpf-ips-dashboard.json; do
   [ -f "$HERE/$f" ] || {
     echo "missing $f next to install.sh — run install.sh from the unzipped release directory" >&2
     exit 1
@@ -23,7 +22,7 @@ done
 
 case "$(uname -s)" in
   Linux) ;;
-  *) echo "gameshield-ebpf only runs on Linux (current: $(uname -s))" >&2; exit 1 ;;
+  *) echo "fivem-ebpf only runs on Linux (current: $(uname -s))" >&2; exit 1 ;;
 esac
 
 [ -e /sys/kernel/btf/vmlinux ] || {
@@ -44,19 +43,10 @@ if ! [ -e /sys/fs/cgroup/cgroup.controllers ]; then
 fi
 
 WAS_RUNNING=0
-if $SUDO systemctl is-active --quiet gameshield-ebpf 2>/dev/null; then
+if $SUDO systemctl is-active --quiet fivem-ebpf 2>/dev/null; then
   WAS_RUNNING=1
-  echo "stopping running gameshield-ebpf"
-  $SUDO systemctl stop gameshield-ebpf
-fi
-
-if $SUDO systemctl is-enabled --quiet fivem-ebpf 2>/dev/null; then
-  echo "disabling legacy fivem-ebpf unit (replaced by gameshield-ebpf)"
-  $SUDO systemctl disable --now fivem-ebpf || true
-fi
-if [ -d "$LEGACY_PIN_DIR" ]; then
-  echo "removing legacy pinned BPF maps in $LEGACY_PIN_DIR"
-  $SUDO rm -rf "$LEGACY_PIN_DIR"
+  echo "stopping running fivem-ebpf"
+  $SUDO systemctl stop fivem-ebpf
 fi
 
 if [ -d "$PIN_DIR" ]; then
@@ -64,34 +54,50 @@ if [ -d "$PIN_DIR" ]; then
   $SUDO rm -rf "$PIN_DIR"
 fi
 
-$SUDO install -m 0755 "$HERE/gameshield" "$PREFIX/bin/gameshield"
-$SUDO install -m 0644 "$HERE/gameshield-ebpf.service" "$SYSD_DIR/gameshield-ebpf.service"
+$SUDO install -m 0755 "$HERE/fivem-ebpf" "$PREFIX/bin/fivem-ebpf"
+$SUDO install -m 0644 "$HERE/fivem-ebpf.service" "$SYSD_DIR/fivem-ebpf.service"
 $SUDO mkdir -p "$ETC_DIR" "$GRAFANA_DIR"
-$SUDO install -m 0644 "$HERE/gameshield-dashboard.json"     "$GRAFANA_DIR/gameshield-dashboard.json"
-$SUDO install -m 0644 "$HERE/gameshield-ips-dashboard.json" "$GRAFANA_DIR/gameshield-ips-dashboard.json"
+$SUDO install -m 0644 "$HERE/fivem-ebpf-dashboard.json"     "$GRAFANA_DIR/fivem-ebpf-dashboard.json"
+$SUDO install -m 0644 "$HERE/fivem-ebpf-ips-dashboard.json" "$GRAFANA_DIR/fivem-ebpf-ips-dashboard.json"
 
 NEW_CONFIG=0
-if [ ! -e "$ETC_DIR/config.yaml" ]; then
-  $SUDO install -m 0644 "$HERE/config.example.yaml" "$ETC_DIR/config.yaml"
+if [ ! -e "$ETC_DIR/config" ]; then
+  $SUDO install -m 0644 "$HERE/config.example" "$ETC_DIR/config"
   NEW_CONFIG=1
+else
+  ADDED=""
+  while IFS='=' read -r key val; do
+    case "$key" in
+      ''|\#*) continue ;;
+    esac
+    if ! $SUDO grep -q "^${key}=" "$ETC_DIR/config"; then
+      printf "%s=%s\n" "$key" "$val" | $SUDO tee -a "$ETC_DIR/config" >/dev/null
+      ADDED="$ADDED $key"
+    fi
+  done < "$HERE/config.example"
+  if [ -n "$ADDED" ]; then
+    echo "added new config keys to $ETC_DIR/config (defaults from this release):$ADDED"
+  fi
 fi
 
 $SUDO systemctl daemon-reload
 
 if [ "$WAS_RUNNING" = 1 ]; then
-  echo "starting gameshield-ebpf"
-  $SUDO systemctl start gameshield-ebpf
+  echo "starting fivem-ebpf"
+  $SUDO systemctl start fivem-ebpf
 fi
 
 echo
-echo "installed $PREFIX/bin/gameshield"
-echo "  config:     $ETC_DIR/config.yaml"
-echo "  unit:       $SYSD_DIR/gameshield-ebpf.service"
-echo "  dashboards: $GRAFANA_DIR/ (import the .json files into Grafana)"
+echo "installed $PREFIX/bin/fivem-ebpf"
+echo "  config:    $ETC_DIR/config"
+echo "  unit:      $SYSD_DIR/fivem-ebpf.service"
+echo "  dashboards: $GRAFANA_DIR/ (import both .json files into Grafana)"
+echo "              fivem-ebpf-dashboard.json     — main metrics view"
+echo "              fivem-ebpf-ips-dashboard.json — per-IP listings (needs Infinity datasource)"
 if [ "$NEW_CONFIG" = 1 ]; then
   echo
-  echo "EDIT $ETC_DIR/config.yaml — iface is eth0 by default, probably wrong"
-  echo "  $SUDO systemctl enable --now gameshield-ebpf"
+  echo "EDIT $ETC_DIR/config — IFACE is eth0 by default, probably wrong"
+  echo "  $SUDO systemctl enable --now fivem-ebpf"
 fi
-echo "  $SUDO systemctl status gameshield-ebpf"
-echo "  sudo journalctl -u gameshield-ebpf -f"
+echo "  $SUDO systemctl status fivem-ebpf"
+echo "  sudo journalctl -u fivem-ebpf -f"

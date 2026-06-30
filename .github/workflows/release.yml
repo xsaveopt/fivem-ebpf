@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.22"
           cache: true
 
       - name: install clang/llvm/libbpf
@@ -55,37 +55,37 @@ jobs:
           mkdir -p stage
           go build -trimpath \
             -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o stage/gameshield \
-            ./cmd/gameshield
-          chmod 0755 stage/gameshield
+            -o stage/fivem-ebpf \
+            ./cmd/fivem-ebpf
+          chmod 0755 stage/fivem-ebpf
 
       - name: stage release files
         run: |
-          cp deploy/gameshield-ebpf.service stage/
-          cp deploy/config.example.yaml stage/
+          cp deploy/fivem-ebpf.service stage/
+          cp deploy/config.example stage/
           cp deploy/install.sh stage/
-          cp deploy/grafana/gameshield-dashboard.json stage/
-          cp deploy/grafana/gameshield-ips-dashboard.json stage/
+          cp deploy/grafana/fivem-ebpf-dashboard.json stage/
+          cp deploy/grafana/fivem-ebpf-ips-dashboard.json stage/
           chmod 0755 stage/install.sh
 
       - name: package zip
         run: |
-          ZIP="gameshield-ebpf-${GITHUB_REF_NAME}-linux-${{ matrix.goarch }}.zip"
+          ZIP="fivem-ebpf-${GITHUB_REF_NAME}-linux-${{ matrix.goarch }}.zip"
           (cd stage && zip -q "../$ZIP" \
-            gameshield \
-            gameshield-ebpf.service \
-            config.example.yaml \
+            fivem-ebpf \
+            fivem-ebpf.service \
+            config.example \
             install.sh \
-            gameshield-dashboard.json \
-            gameshield-ips-dashboard.json)
+            fivem-ebpf-dashboard.json \
+            fivem-ebpf-ips-dashboard.json)
           sha256sum "$ZIP" > "$ZIP.sha256"
           ls -l "$ZIP" "$ZIP.sha256"
 
       - uses: softprops/action-gh-release@v3
         with:
           files: |
-            gameshield-ebpf-*-linux-*.zip
-            gameshield-ebpf-*-linux-*.zip.sha256
+            fivem-ebpf-*-linux-*.zip
+            fivem-ebpf-*-linux-*.zip.sha256
           fail_on_unmatched_files: true
           draft: false
           generate_release_notes: true
