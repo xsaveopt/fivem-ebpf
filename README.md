@@ -115,7 +115,7 @@ The release ships two Grafana dashboards in `/etc/fivem-ebpf/grafana/`: the main
 
 ## Known limitations
 
-- **No per-packet crypto auth.** Whitelisted IPs are bounded only by ENet validation + per-IP rate limits; a botnet of N IPs can collectively push `N × --udp-rate` pps of valid-looking ENet. ENet check stops random-byte floods, not spec-compliant ones. See [ROADMAP](ROADMAP.md) for the statistical-scoring direction.
+- **No per-packet crypto auth.** Whitelisted IPs are bounded only by ENet validation + per-IP rate limits; a botnet of N IPs can collectively push `N × --udp-rate` pps of valid-looking ENet. ENet check stops random-byte floods, not spec-compliant ones. Statistical per-IP scoring is the planned direction.
 - **L7 match is a byte pattern.** An attacker who crafts `POST /client` + `CitizenFX/1` over a real TCP connection passes — same as iptables string-match. This filter buys speed, not new security primitives.
 - **Bad-UA blocklist is narrow on purpose.** Only the literal `CitizenFX\r` (no `/1`) is dropped; `curl/`, `python-*`, `Mozilla/*` etc. are kept legal because legitimate server-list scrapers use them. Per-IP GET rate limit catches abusive scraping instead.
 - **IPv4 only.** Sockops uses `remote_ip4`. FiveM bound to `::` and reached over native v6 skips the filter — bind `0.0.0.0` explicitly.
