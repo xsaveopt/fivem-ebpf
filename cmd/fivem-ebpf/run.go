@@ -16,8 +16,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/sratabix/fivem-ebpf/internal/loader"
-	"github.com/sratabix/fivem-ebpf/internal/metrics"
+	"github.com/xsaveopt/fivem-ebpf/internal/loader"
+	"github.com/xsaveopt/fivem-ebpf/internal/metrics"
 )
 
 func cmdRun(args []string) {

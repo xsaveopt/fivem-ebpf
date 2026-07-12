@@ -20,13 +20,13 @@ FiveM listens on port **30120** for both TCP and UDP. TCP serves the HTTP-style 
 
 ## Install
 
-Download the release zip for your arch from the [releases page](https://github.com/sratabix/fivem-ebpf/releases), unzip, and run the installer:
+Download the release zip for your arch from the [releases page](https://github.com/xsaveopt/fivem-ebpf/releases), unzip, and run the installer:
 
 ```sh
 VERSION=v0.1.0
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-curl -sfLO "https://github.com/sratabix/fivem-ebpf/releases/download/$VERSION/fivem-ebpf-$VERSION-linux-$ARCH.zip"
-curl -sfLO "https://github.com/sratabix/fivem-ebpf/releases/download/$VERSION/fivem-ebpf-$VERSION-linux-$ARCH.zip.sha256"
+curl -sfLO "https://github.com/xsaveopt/fivem-ebpf/releases/download/$VERSION/fivem-ebpf-$VERSION-linux-$ARCH.zip"
+curl -sfLO "https://github.com/xsaveopt/fivem-ebpf/releases/download/$VERSION/fivem-ebpf-$VERSION-linux-$ARCH.zip.sha256"
 sha256sum -c "fivem-ebpf-$VERSION-linux-$ARCH.zip.sha256"
 unzip -d fivem-ebpf-$VERSION "fivem-ebpf-$VERSION-linux-$ARCH.zip"
 cd fivem-ebpf-$VERSION && sudo sh install.sh

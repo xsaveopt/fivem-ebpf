@@ -1,4 +1,4 @@
-module github.com/sratabix/fivem-ebpf
+module github.com/xsaveopt/fivem-ebpf
 
 go 1.22
 

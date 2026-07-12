@@ -1,6 +1,6 @@
 [Unit]
 Description=FiveM XDP DDoS filter
-Documentation=https://github.com/sratabix/fivem-ebpf
+Documentation=https://github.com/xsaveopt/fivem-ebpf
 After=network-online.target
 Wants=network-online.target
 

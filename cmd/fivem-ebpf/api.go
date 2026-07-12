@@ -11,7 +11,7 @@ import (
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 
-	"github.com/sratabix/fivem-ebpf/internal/loader"
+	"github.com/xsaveopt/fivem-ebpf/internal/loader"
 )
 
 type timestampEntry struct {
