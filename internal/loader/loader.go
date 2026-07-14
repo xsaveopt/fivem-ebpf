@@ -67,7 +67,7 @@ func (l *Loaded) Close() error {
 		l.TCPOpenCount, l.UDPHealth, l.IPDropHistory, l.Stats,
 	} {
 		if m != nil {
-			m.Close()
+			_ = m.Close()
 		}
 	}
 	return errors.Join(errs...)
@@ -91,11 +91,11 @@ func Load(opts Options) (*Loaded, error) {
 		closeXDPObjs(xobj)
 		return nil, fmt.Errorf("attach xdp: %w", err)
 	}
-	xobj.FivemXdp.Close()
+	_ = xobj.FivemXdp.Close()
 
 	sobj, err := loadSockops(opts)
 	if err != nil {
-		xlink.Close()
+		_ = xlink.Close()
 		closeXDPMaps(xobj)
 		return nil, err
 	}
@@ -106,14 +106,14 @@ func Load(opts Options) (*Loaded, error) {
 	})
 	if err != nil {
 		closeSockopsObjs(sobj)
-		xlink.Close()
+		_ = xlink.Close()
 		closeXDPMaps(xobj)
 		return nil, fmt.Errorf("attach sockops to %s: %w", opts.CgroupPath, err)
 	}
-	sobj.FivemSockops.Close()
-	sobj.TcpEstablished.Close()
-	sobj.TcpOpenCount.Close()
-	sobj.Stats.Close()
+	_ = sobj.FivemSockops.Close()
+	_ = sobj.TcpEstablished.Close()
+	_ = sobj.TcpOpenCount.Close()
+	_ = sobj.Stats.Close()
 
 	return &Loaded{
 		XDPLink:              xlink,
@@ -267,7 +267,7 @@ func attachXDP(prog *ebpf.Program, ifindex int) (link.Link, string, error) {
 }
 
 func closeXDPObjs(o *fivemXDPObjects) {
-	o.FivemXdp.Close()
+	_ = o.FivemXdp.Close()
 	closeXDPMaps(o)
 }
 
@@ -279,14 +279,14 @@ func closeXDPMaps(o *fivemXDPObjects) {
 		o.TcpOpenCount, o.UdpHealth, o.IpDropHistory, o.Stats,
 	} {
 		if m != nil {
-			m.Close()
+			_ = m.Close()
 		}
 	}
 }
 
 func closeSockopsObjs(o *fivemSockopsObjects) {
-	o.FivemSockops.Close()
-	o.TcpEstablished.Close()
-	o.TcpOpenCount.Close()
-	o.Stats.Close()
+	_ = o.FivemSockops.Close()
+	_ = o.TcpEstablished.Close()
+	_ = o.TcpOpenCount.Close()
+	_ = o.Stats.Close()
 }

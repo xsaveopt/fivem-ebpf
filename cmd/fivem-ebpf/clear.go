@@ -95,7 +95,7 @@ func clearMapKey(path string, key [4]byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 
 	if err := m.Delete(&key); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
@@ -111,7 +111,7 @@ func clearMap(path string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 
 	keys, err := collectKeys(m)
 	if err != nil {

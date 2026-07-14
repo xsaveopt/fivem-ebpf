@@ -77,7 +77,7 @@ func cmdInfo(args []string) {
 
 	stats, err := ebpf.LoadPinnedMap(filepath.Join(*pinPath, "stats"), nil)
 	if err == nil {
-		defer stats.Close()
+		defer func() { _ = stats.Close() }()
 		if vals, _ := readStatsMap(stats); vals != nil {
 			byLabel := map[string]uint64{}
 			for i, lbl := range statLabels {
