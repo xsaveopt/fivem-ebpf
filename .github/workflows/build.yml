@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.22"
+          go-version-file: go.mod
           cache: true
 
       - name: install clang/llvm/libbpf
@@ -46,6 +46,11 @@ jobs:
 
       - name: go vet
         run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
 
       - name: go build
         env:
