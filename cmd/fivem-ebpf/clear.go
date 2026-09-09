@@ -18,7 +18,7 @@ func cmdClear(args []string) {
 	ipFlag := fs.String("ip", "", "if set, only clear this single IPv4 from the target map(s) instead of wiping every entry")
 	_ = fs.Parse(args)
 
-	targets := []string{}
+	var targets []string
 	switch *which {
 	case "whitelist":
 		targets = []string{"tcp_whitelist"}

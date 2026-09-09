@@ -83,7 +83,7 @@ func inspectTimestamp(pinPath, name string, key [4]byte, now uint64) {
 	if !ok {
 		return
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var val uint64
 	if err := m.Lookup(&key, &val); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
@@ -105,7 +105,7 @@ func inspectCount(pinPath, name string, key [4]byte) {
 	if !ok {
 		return
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var val uint64
 	if err := m.Lookup(&key, &val); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
@@ -123,7 +123,7 @@ func inspectRatelimit(pinPath, name string, key [4]byte, now uint64) {
 	if !ok {
 		return
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var val struct {
 		Tokens       uint64
 		LastRefillNS uint64
@@ -149,7 +149,7 @@ func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
 	if !ok {
 		return
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var val struct {
 		Anomalies        uint32
 		_                uint32
@@ -185,7 +185,7 @@ func inspectDropHistory(pinPath, name string, key [4]byte, now uint64) {
 	if !ok {
 		return
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var val struct {
 		FirstDropNS uint64
 		LastDropNS  uint64

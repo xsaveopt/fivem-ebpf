@@ -27,7 +27,7 @@ func mapEntryCount(pinPath, name string) int64 {
 	if err != nil {
 		return -1
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	var n int64
 	var key [4]byte
 	val := make([]byte, m.ValueSize())
@@ -43,7 +43,7 @@ func blacklistedNow(pinPath string) int64 {
 	if err != nil {
 		return -1
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	now := bootTimeNS()
 	var n int64
 	var key [4]byte

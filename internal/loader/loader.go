@@ -261,7 +261,7 @@ func attachXDP(prog *ebpf.Program, ifindex int) (link.Link, string, error) {
 		Flags:     link.XDPGenericMode,
 	})
 	if err2 != nil {
-		return nil, "", fmt.Errorf("native: %v; generic: %w", err, err2)
+		return nil, "", fmt.Errorf("native: %w; generic: %w", err, err2)
 	}
 	return l, "generic", nil
 }
