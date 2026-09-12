@@ -1,72 +1,70 @@
-# fivem-ebpf runtime config. Read by systemd via EnvironmentFile=.
-# Values here become CLI flags on the `fivem-ebpf run` invocation.
+# systemd reads this file and turns every value into a flag on the run command.
+# Change a value rather than deleting a line, because a key that isn't here leaves its flag with nothing after it.
 
-# Network interface the XDP program attaches to. Find via `ip -br link`.
+# The network card the filter attaches to.
+# Traffic arriving on any other card is not filtered at all, so this has to be the one your players reach you on.
 IFACE=eth0
 
-# FiveM port (TCP + UDP).
+# The port your server listens on, for both tcp and udp.
+# Everything else on the card passes straight through.
 PORT=30120
 
-# Whitelist TTL — how long a successfully handshaked IP stays allowed
-# without a fresh handshake.
+# How long a player stays allowed to send udp after the last packet you saw from them.
+# Every packet pushes this back, so it only runs out on someone who has gone quiet, and they have to reconnect once it does.
 TTL=10m
 
-# Prometheus /metrics listen address.
+# Where the metrics and the api listen.
+# The api serves the ip of every connected player and has no authentication in front of it.
 METRICS_ADDR=127.0.0.1:9464
 
-# BPF map pin directory. Survives process restart; cleared on reboot.
+# Where the filter keeps its state.
+# It lives outside the process, so restarting the service keeps everyone connected instead of kicking them.
+# The cli reads the same place and takes --pin-path if you move it.
 PIN_PATH=/sys/fs/bpf/fivem
 
-# cgroup v2 root. Change only for containerized FiveM deployments.
+# Where the filter hooks into the kernel to hear about finished handshakes.
 CGROUP_PATH=/sys/fs/cgroup
 
-# Per-IP UDP token bucket (gameplay packet rate).
+# How much gameplay traffic one player may send.
+# The rate is packets per second and the burst is how many they can fire off back to back after a quiet moment.
+# A real player sits around 60 a second.
 UDP_RATE=1500
 UDP_BURST=4500
 
-# Per-IP POST /client rate limit (handshake attempts per minute + burst).
-# Tightened from 10 → 3 after analyzing a real captured attack where 980 IPs
-# × 10 burst flooded the server in the first second.
+# How often one address may try to join.
+# Three attempts back to back covers someone retrying a bad connection, and they earn six more per minute.
 INITCONNECT_PER_MIN=6
 INITCONNECT_BURST=3
 
-# Per-IP GET /info.json|/dynamic.json|/players.json rate limit. These
-# endpoints return multi-KB JSON (25–50× amplification) and are the primary
-# bandwidth-amplification vector — real clients hit them once or twice per
-# join, bots hammer them dozens of times per second.
+# How often one address may pull the server info pages.
+# Those replies are several kilobytes against a tiny request, which is what makes them worth abusing.
 GETINFO_PER_MIN=6
 GETINFO_BURST=5
 
-# Global TCP circuit breaker. Caps aggregate packets/sec to the target port
-# across all source IPs combined — fires when many-IP attacks slip through
-# per-IP limits and the sum saturates the server. Set rate=0 to disable;
-# under attack you may want to tighten this to e.g. 1500/4500.
+# A brake on new connections when things get out of hand.
+# It only counts attempts from addresses that are not already playing, so your current players keep reconnecting normally while a flood gets capped.
+# Set the rate to 0 to turn it off.
 TCP_GLOBAL_RATE=5000
 TCP_GLOBAL_BURST=15000
 
-# Per-IP cap on simultaneously-open TCP sockets to the target port. Catches
-# connection-hold attacks (bots that complete 3WHS but never speak L7, so
-# none of the payload-based filters fire). Real FiveM clients hold ~4-8
-# parallel asset-download connections, plus TIME_WAIT residue from prior
-# attempts and concurrent /info.json scrapes — 16 is the empirically-derived
-# headroom that doesn't kick legit retry-storm players. Whitelisted IPs
-# bypass this check entirely (handshake already proves they're real).
-# 0 disables.
+# How many tcp connections one address may hold open at once.
+# This is what catches bots that connect and then go silent, because the other checks only ever look at packets that carry something.
+# A real client holds four to eight while it downloads assets.
+# Set 0 to turn it off.
 TCP_MAX_OPEN_PER_IP=16
 
-# UDP health checks. A packet that fails ENet structural validation counts
-# as an anomaly; an IP that accumulates HEALTH_THRESHOLD anomalies within
-# HEALTH_WINDOW is blacklisted for HEALTH_BLACKLIST.
+# Addresses sending udp that does not look like real game traffic get blocked for a while.
+# One that racks up HEALTH_THRESHOLD bad packets inside HEALTH_WINDOW is out for HEALTH_BLACKLIST.
 HEALTH_WINDOW=60s
 HEALTH_THRESHOLD=100
 HEALTH_BLACKLIST=5m
 
-# How often to refresh the fivem_map_entries Prometheus gauges. Iterating
-# 100k-entry LRU maps is expensive, so this is done by a background ticker
-# rather than on every /metrics scrape.
+# How often the tracked address counts get recounted for your dashboard.
+# Counting means walking a map that holds up to a hundred thousand entries, so it runs on a timer rather than on every scrape.
+# Set it to 0 to stop counting and everything else keeps working.
 MAP_SIZE_INTERVAL=30s
 
-# Remembers why each ip was dropped. Having a reason why an ip was blocked
-# gives you debugging info for when a legitimate player tried to join but
-# couldn't. Turning this on has no real performance impact.
+# Remembers why each ip was dropped.
+# Having a reason why an ip was blocked gives you debugging info for when a legitimate player tried to join but couldn't.
+# Turning this on has no real performance impact.
 DROP_HISTORY=true
