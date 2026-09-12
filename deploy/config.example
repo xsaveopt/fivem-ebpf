@@ -12,7 +12,7 @@ PORT=30120
 TTL=10m
 
 # Prometheus /metrics listen address.
-METRICS_ADDR=:9464
+METRICS_ADDR=127.0.0.1:9464
 
 # BPF map pin directory. Survives process restart; cleared on reboot.
 PIN_PATH=/sys/fs/bpf/fivem
@@ -65,3 +65,8 @@ HEALTH_BLACKLIST=5m
 # 100k-entry LRU maps is expensive, so this is done by a background ticker
 # rather than on every /metrics scrape.
 MAP_SIZE_INTERVAL=30s
+
+# Remembers why each ip was dropped. Having a reason why an ip was blocked
+# gives you debugging info for when a legitimate player tried to join but
+# couldn't. Turning this on has no real performance impact.
+DROP_HISTORY=true
