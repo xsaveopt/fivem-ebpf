@@ -4,87 +4,68 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/cilium/ebpf"
+	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
-var perIPMaps = []string{
-	"tcp_whitelist",
-	"tcp_established",
-	"tcp_syn_seen",
-	"tcp_open_count",
-	"udp_ratelimit",
-	"initconnect_ratelimit",
-	"getinfo_ratelimit",
-	"udp_health",
-	"ip_drop_history",
-}
-
-func mapEntryCount(pinPath, name string) int64 {
-	m, err := ebpf.LoadPinnedMap(filepath.Join(pinPath, name), nil)
+func mapEntryCount(pinPath, name string) (int64, error) {
+	m, err := bpfmaps.Open(pinPath, name)
 	if err != nil {
-		return -1
+		return -1, err
 	}
 	defer func() { _ = m.Close() }()
-	var n int64
-	var key [4]byte
-	val := make([]byte, m.ValueSize())
-	iter := m.Iterate()
-	for iter.Next(&key, &val) {
-		n++
-	}
-	return n
+	return bpfmaps.CountKeys(m)
 }
 
-func blacklistedNow(pinPath string) int64 {
-	m, err := ebpf.LoadPinnedMap(filepath.Join(pinPath, "udp_health"), nil)
+func blacklistedNow(pinPath string) (int64, error) {
+	m, err := bpfmaps.Open(pinPath, bpfmaps.Health)
 	if err != nil {
-		return -1
+		return -1, err
 	}
 	defer func() { _ = m.Close() }()
-	now := bootTimeNS()
+	now, err := bpfmaps.BootTimeNS()
+	if err != nil {
+		return -1, err
+	}
 	var n int64
 	var key [4]byte
-	var val struct {
-		Anomalies        uint32
-		_                uint32
-		WindowStartNS    uint64
-		BlacklistUntilNS uint64
-	}
+	var val bpfmaps.UDPHealth
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
 		if val.BlacklistUntilNS > now {
 			n++
 		}
 	}
-	return n
+	return n, iter.Err()
 }
 
 func cmdInfo(args []string) {
 	fs := flag.NewFlagSet("info", flag.ExitOnError)
-	pinPath := fs.String("pin-path", "/sys/fs/bpf/fivem", "bpf map pin directory")
+	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
 	_ = fs.Parse(args)
 
 	fmt.Printf("fivem-ebpf %s\n", version)
 	fmt.Printf("  pin path: %s\n", *pinPath)
 
 	if _, err := os.Stat(*pinPath); err != nil {
-		fmt.Fprintln(os.Stderr, "  (no pinned maps — daemon not running?)")
+		fmt.Fprintln(os.Stderr, "  (no pinned maps, daemon not running?)")
 		os.Exit(1)
 	}
 
-	stats, err := ebpf.LoadPinnedMap(filepath.Join(*pinPath, "stats"), nil)
-	if err == nil {
+	stats, err := bpfmaps.Open(*pinPath, bpfmaps.Stats)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, " ", err)
+	} else {
 		defer func() { _ = stats.Close() }()
-		if vals, _ := readStatsMap(stats); vals != nil {
+		vals, err := bpfmaps.ReadStats(stats)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, " ", err)
+		} else {
 			byLabel := map[string]uint64{}
-			for i, lbl := range statLabels {
+			for i, lbl := range bpfmaps.StatLabels {
 				byLabel[lbl] = vals[i]
 			}
-			passTCP := byLabel["pass_tcp"]
-			passUDP := byLabel["pass_udp_whitelisted"]
 			var dropTCP, dropUDP uint64
 			for lbl, v := range byLabel {
 				switch {
@@ -93,24 +74,25 @@ func cmdInfo(args []string) {
 				case strings.HasPrefix(lbl, "drop_udp_"):
 					dropUDP += v
 				case lbl == "drop_malformed":
-					dropUDP += v
+					dropTCP += v
 				}
 			}
-			fmt.Printf("  tcp: %d pass / %d drop\n", passTCP, dropTCP)
-			fmt.Printf("  udp: %d pass / %d drop\n", passUDP, dropUDP)
+			fmt.Printf("  tcp: %d pass / %d drop\n", byLabel["pass_tcp"], dropTCP)
+			fmt.Printf("  udp: %d pass / %d drop\n", byLabel["pass_udp_whitelisted"], dropUDP)
+			fmt.Printf("  ip fragments dropped: %d\n", byLabel["drop_ip_fragment"])
 		}
 	}
 
 	fmt.Println("  map populations:")
-	for _, name := range perIPMaps {
-		n := mapEntryCount(*pinPath, name)
-		if n < 0 {
-			fmt.Printf("    %-22s (closed)\n", name)
-		} else {
-			fmt.Printf("    %-22s %d\n", name, n)
+	for _, name := range bpfmaps.PerIP {
+		n, err := mapEntryCount(*pinPath, name)
+		if err != nil {
+			fmt.Printf("    %-22s (%v)\n", name, err)
+			continue
 		}
+		fmt.Printf("    %-22s %d\n", name, n)
 	}
-	if bl := blacklistedNow(*pinPath); bl >= 0 {
+	if bl, err := blacklistedNow(*pinPath); err == nil {
 		fmt.Printf("    %-22s %d\n", "udp_health (blacklisted)", bl)
 	}
 }

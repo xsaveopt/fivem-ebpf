@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+
+	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
 type Options struct {
@@ -29,6 +32,7 @@ type Options struct {
 	HealthWindow      time.Duration
 	HealthThreshold   uint32
 	HealthBlacklist   time.Duration
+	DropHistory       bool
 }
 
 type Loaded struct {
@@ -46,6 +50,32 @@ type Loaded struct {
 	IPDropHistory        *ebpf.Map
 	Stats                *ebpf.Map
 	XDPMode              string
+}
+
+func (l *Loaded) ByPinnedName(name string) *ebpf.Map {
+	switch name {
+	case bpfmaps.Whitelist:
+		return l.TCPWhitelist
+	case bpfmaps.Established:
+		return l.TCPEstablished
+	case bpfmaps.SynSeen:
+		return l.TCPSynSeen
+	case bpfmaps.OpenCount:
+		return l.TCPOpenCount
+	case bpfmaps.UDPRatelimit:
+		return l.UDPRatelimit
+	case bpfmaps.InitConnectRatelimit:
+		return l.InitConnectRatelimit
+	case bpfmaps.GetInfoRatelimit:
+		return l.GetInfoRatelimit
+	case bpfmaps.Health:
+		return l.UDPHealth
+	case bpfmaps.DropHistoryMap:
+		return l.IPDropHistory
+	case bpfmaps.Stats:
+		return l.Stats
+	}
+	return nil
 }
 
 func (l *Loaded) Close() error {
@@ -67,7 +97,9 @@ func (l *Loaded) Close() error {
 		l.TCPOpenCount, l.UDPHealth, l.IPDropHistory, l.Stats,
 	} {
 		if m != nil {
-			_ = m.Close()
+			if err := m.Close(); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -80,6 +112,9 @@ func Load(opts Options) (*Loaded, error) {
 	}
 	if err := os.MkdirAll(opts.PinPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create pin path: %w", err)
+	}
+	if err := checkBPFFS(opts.PinPath); err != nil {
+		return nil, err
 	}
 
 	xobj, err := loadXDP(opts)
@@ -111,9 +146,14 @@ func Load(opts Options) (*Loaded, error) {
 		return nil, fmt.Errorf("attach sockops to %s: %w", opts.CgroupPath, err)
 	}
 	_ = sobj.FivemSockops.Close()
-	_ = sobj.TcpEstablished.Close()
-	_ = sobj.TcpOpenCount.Close()
-	_ = sobj.Stats.Close()
+	closeSockopsMaps(sobj)
+
+	if err := clearMap(xobj.TcpOpenCount); err != nil {
+		_ = slink.Close()
+		_ = xlink.Close()
+		closeXDPMaps(xobj)
+		return nil, fmt.Errorf("reset %s: %w", "tcp_open_count", err)
+	}
 
 	return &Loaded{
 		XDPLink:              xlink,
@@ -175,7 +215,7 @@ func loadXDP(opts Options) (*fivemXDPObjects, error) {
 		return nil, err
 	}
 
-	ncpu, _ := ebpf.PossibleCPU()
+	ncpu := runtime.NumCPU()
 	if ncpu <= 0 {
 		ncpu = 1
 	}
@@ -209,13 +249,29 @@ func loadXDP(opts Options) (*fivemXDPObjects, error) {
 	if err := setVar(spec, "health_blacklist_ns", uint64(opts.HealthBlacklist.Nanoseconds())); err != nil {
 		return nil, err
 	}
+	var dropHistory uint8
+	if opts.DropHistory {
+		dropHistory = 1
+	}
+	if err := setVar(spec, "drop_history_enabled", dropHistory); err != nil {
+		return nil, err
+	}
 	obj := &fivemXDPObjects{}
 	if err := spec.LoadAndAssign(obj, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{PinPath: opts.PinPath},
 	}); err != nil {
-		return nil, fmt.Errorf("load xdp objects: %w", err)
+		return nil, wrapLoadError("xdp", opts.PinPath, err)
 	}
 	return obj, nil
+}
+
+func wrapLoadError(what, pinPath string, err error) error {
+	if errors.Is(err, ebpf.ErrMapIncompatible) {
+		return fmt.Errorf("load %s objects: the pinned maps in %s were created by an "+
+			"incompatible build; remove them with: rm -rf %s (this drops every active "+
+			"session and forces players to reconnect): %w", what, pinPath, pinPath, err)
+	}
+	return fmt.Errorf("load %s objects: %w", what, err)
 }
 
 func loadSockops(opts Options) (*fivemSockopsObjects, error) {
@@ -230,7 +286,7 @@ func loadSockops(opts Options) (*fivemSockopsObjects, error) {
 	if err := spec.LoadAndAssign(obj, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{PinPath: opts.PinPath},
 	}); err != nil {
-		return nil, fmt.Errorf("load sockops objects: %w", err)
+		return nil, wrapLoadError("sockops", opts.PinPath, err)
 	}
 	return obj, nil
 }
@@ -238,10 +294,32 @@ func loadSockops(opts Options) (*fivemSockopsObjects, error) {
 func setVar(spec *ebpf.CollectionSpec, name string, value any) error {
 	v, ok := spec.Variables[name]
 	if !ok {
-		return nil
+		return fmt.Errorf("bpf program has no variable %q: rebuild the BPF objects (make generate)", name)
 	}
 	if err := v.Set(value); err != nil {
 		return fmt.Errorf("set %s: %w", name, err)
+	}
+	return nil
+}
+
+func clearMap(m *ebpf.Map) error {
+	if m == nil {
+		return nil
+	}
+	var keys [][4]byte
+	var key [4]byte
+	valBuf := make([]byte, m.ValueSize())
+	iter := m.Iterate()
+	for iter.Next(&key, &valBuf) {
+		keys = append(keys, key)
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if err := m.Delete(&k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			return err
+		}
 	}
 	return nil
 }
@@ -286,7 +364,18 @@ func closeXDPMaps(o *fivemXDPObjects) {
 
 func closeSockopsObjs(o *fivemSockopsObjects) {
 	_ = o.FivemSockops.Close()
-	_ = o.TcpEstablished.Close()
-	_ = o.TcpOpenCount.Close()
-	_ = o.Stats.Close()
+	closeSockopsMaps(o)
+}
+
+func closeSockopsMaps(o *fivemSockopsObjects) {
+	for _, m := range []*ebpf.Map{
+		o.TcpEstablished, o.TcpSynSeen, o.TcpWhitelist,
+		o.UdpRatelimit, o.InitconnectRatelimit,
+		o.GetinfoRatelimit, o.TcpGlobalRatelimit,
+		o.TcpOpenCount, o.UdpHealth, o.IpDropHistory, o.Stats,
+	} {
+		if m != nil {
+			_ = m.Close()
+		}
+	}
 }

@@ -2,44 +2,15 @@ package metrics
 
 import (
 	"context"
-	"fmt"
+	"log"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/sys/unix"
-)
 
-func bootTimeNS() uint64 {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
-		return 0
-	}
-	return uint64(ts.Sec)*1_000_000_000 + uint64(ts.Nsec)
-}
-
-const (
-	StatPassTCP                     = 0
-	StatPassUDPWhitelisted          = 1
-	StatDropUDPNotWhitelisted       = 2
-	StatDropUDPExpired              = 3
-	StatDropMalformed               = 4
-	StatTCPEstablishedInserts       = 5
-	StatTCPL7Promoted               = 6
-	StatTCPL7MatchNoEst             = 7
-	StatDropUDPRatelimit            = 8
-	StatDropTCPInitconnectRatelimit = 9
-	StatDropUDPEnetMalformed        = 10
-	StatDropUDPUnhealthy            = 11
-	StatTCPPostClientSeen           = 12
-	StatTCPGetinfoSeen              = 13
-	StatDropTCPGetinfoRatelimit     = 14
-	StatDropTCPBadUserAgent         = 15
-	StatDropTCPNoSyn                = 16
-	StatDropTCPGlobalRatelimit      = 17
-	StatDropTCPTooManyOpen          = 18
-	StatMax                         = 19
+	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
 type MapSizes struct {
@@ -74,6 +45,7 @@ type Collector struct {
 	promoted    *prometheus.Desc
 	noEst       *prometheus.Desc
 	postSeen    *prometheus.Desc
+	postUnknown *prometheus.Desc
 	getinfoSeen *prometheus.Desc
 	mapSize     *prometheus.Desc
 	blacklisted *prometheus.Desc
@@ -141,6 +113,11 @@ func NewCollector(
 			"TCP data segments matching POST /client at offset 0 (regardless of verdict).",
 			nil, nil,
 		),
+		postUnknown: prometheus.NewDesc(
+			"fivem_tcp_post_client_ua_unknown_total",
+			"POST /client segments carrying no recognisable User-Agent, so no promotion happened.",
+			nil, nil,
+		),
 		getinfoSeen: prometheus.NewDesc(
 			"fivem_tcp_getinfo_seen_total",
 			"TCP data segments matching GET /info.json, /dynamic.json, or /players.json (regardless of verdict).",
@@ -174,8 +151,14 @@ func NewCollector(
 	}
 }
 
-func (c *Collector) StartSizeTicker(ctx context.Context, interval time.Duration) {
+func (c *Collector) StartSizeTicker(ctx context.Context, interval time.Duration) func() {
+	if interval <= 0 {
+		log.Printf("map-size gauges disabled (map-size-interval %s)", interval)
+		return func() {}
+	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		c.refreshSizes()
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -188,48 +171,46 @@ func (c *Collector) StartSizeTicker(ctx context.Context, interval time.Duration)
 			}
 		}
 	}()
+	return func() { <-done }
 }
 
 func (c *Collector) refreshSizes() {
-	c.sizes.whitelist.Store(countKeys(c.whitelistMap))
-	c.sizes.established.Store(countKeys(c.establishedMap))
-	c.sizes.synSeen.Store(countKeys(c.synSeenMap))
-	c.sizes.openCount.Store(countKeys(c.openCountMap))
-	c.sizes.udpRL.Store(countKeys(c.udpRLMap))
-	c.sizes.initcRL.Store(countKeys(c.initcRLMap))
-	c.sizes.getinfoRL.Store(countKeys(c.getinfoRLMap))
-	c.sizes.dropHistory.Store(countKeys(c.dropHistoryMap))
-	total, blacklisted := countHealth(c.healthMap)
+	store := func(dst *atomic.Int64, name string, m *ebpf.Map) {
+		n, err := bpfmaps.CountKeys(m)
+		if err != nil {
+			log.Printf("map-size %s: %v (keeping previous value)", name, err)
+			return
+		}
+		dst.Store(n)
+	}
+	store(&c.sizes.whitelist, bpfmaps.Whitelist, c.whitelistMap)
+	store(&c.sizes.established, bpfmaps.Established, c.establishedMap)
+	store(&c.sizes.synSeen, bpfmaps.SynSeen, c.synSeenMap)
+	store(&c.sizes.openCount, bpfmaps.OpenCount, c.openCountMap)
+	store(&c.sizes.udpRL, bpfmaps.UDPRatelimit, c.udpRLMap)
+	store(&c.sizes.initcRL, bpfmaps.InitConnectRatelimit, c.initcRLMap)
+	store(&c.sizes.getinfoRL, bpfmaps.GetInfoRatelimit, c.getinfoRLMap)
+	store(&c.sizes.dropHistory, bpfmaps.DropHistoryMap, c.dropHistoryMap)
+
+	total, blacklisted, err := countHealth(c.healthMap)
+	if err != nil {
+		log.Printf("map-size %s: %v (keeping previous value)", bpfmaps.Health, err)
+		return
+	}
 	c.sizes.health.Store(total)
 	c.sizes.blacklisted.Store(blacklisted)
 }
 
-func countKeys(m *ebpf.Map) int64 {
+func countHealth(m *ebpf.Map) (total, blacklisted int64, err error) {
 	if m == nil {
-		return -1
+		return -1, -1, nil
 	}
-	var n int64
+	now, err := bpfmaps.BootTimeNS()
+	if err != nil {
+		return 0, 0, err
+	}
 	var key [4]byte
-	valBuf := make([]byte, m.ValueSize())
-	iter := m.Iterate()
-	for iter.Next(&key, &valBuf) {
-		n++
-	}
-	return n
-}
-
-func countHealth(m *ebpf.Map) (total, blacklisted int64) {
-	if m == nil {
-		return -1, -1
-	}
-	now := bootTimeNS()
-	var key [4]byte
-	var val struct {
-		Anomalies        uint32
-		_                uint32
-		WindowStartNS    uint64
-		BlacklistUntilNS uint64
-	}
+	var val bpfmaps.UDPHealth
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
 		total++
@@ -237,7 +218,7 @@ func countHealth(m *ebpf.Map) (total, blacklisted int64) {
 			blacklisted++
 		}
 	}
-	return
+	return total, blacklisted, iter.Err()
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -246,6 +227,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.promoted
 	ch <- c.noEst
 	ch <- c.postSeen
+	ch <- c.postUnknown
 	ch <- c.getinfoSeen
 	ch <- c.mapSize
 	ch <- c.blacklisted
@@ -254,49 +236,39 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
-	ncpu, err := ebpf.PossibleCPU()
-	if err != nil || ncpu <= 0 {
-		ncpu = 1
-	}
-	perCPU := make([]uint64, ncpu)
-	sums := make([]uint64, StatMax)
-	for slot := uint32(0); slot < StatMax; slot++ {
-		if err := c.stats.Lookup(&slot, &perCPU); err != nil {
-			continue
+	sums, err := bpfmaps.ReadStats(c.stats)
+	if err != nil {
+		log.Printf("metrics: read stats: %v", err)
+	} else {
+		emit := func(slot int, verdict, proto, reason string) {
+			ch <- prometheus.MustNewConstMetric(
+				c.packets, prometheus.CounterValue, float64(sums[slot]),
+				verdict, proto, reason,
+			)
 		}
-		var s uint64
-		for _, v := range perCPU {
-			s += v
-		}
-		sums[slot] = s
-	}
+		emit(bpfmaps.StatPassTCP, "pass", "tcp", "")
+		emit(bpfmaps.StatPassUDPWhitelisted, "pass", "udp", "whitelisted")
+		emit(bpfmaps.StatDropUDPNotWhitelisted, "drop", "udp", "not_whitelisted")
+		emit(bpfmaps.StatDropUDPExpired, "drop", "udp", "expired")
+		emit(bpfmaps.StatDropUDPRatelimit, "drop", "udp", "ratelimit")
+		emit(bpfmaps.StatDropUDPEnetMalformed, "drop", "udp", "enet_malformed")
+		emit(bpfmaps.StatDropUDPUnhealthy, "drop", "udp", "unhealthy")
+		emit(bpfmaps.StatDropMalformed, "drop", "tcp", "malformed")
+		emit(bpfmaps.StatDropTCPInitconnectRatelimit, "drop", "tcp", "initconnect_ratelimit")
+		emit(bpfmaps.StatDropTCPGetinfoRatelimit, "drop", "tcp", "getinfo_ratelimit")
+		emit(bpfmaps.StatDropTCPBadUserAgent, "drop", "tcp", "bad_user_agent")
+		emit(bpfmaps.StatDropTCPNoSyn, "drop", "tcp", "no_syn")
+		emit(bpfmaps.StatDropTCPGlobalRatelimit, "drop", "tcp", "global_ratelimit")
+		emit(bpfmaps.StatDropTCPTooManyOpen, "drop", "tcp", "too_many_open")
+		emit(bpfmaps.StatDropIPFragment, "drop", "ip", "fragment")
 
-	emit := func(slot int, verdict, proto, reason string) {
-		ch <- prometheus.MustNewConstMetric(
-			c.packets, prometheus.CounterValue, float64(sums[slot]),
-			verdict, proto, reason,
-		)
+		ch <- prometheus.MustNewConstMetric(c.inserts, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPEstablishedInserts]))
+		ch <- prometheus.MustNewConstMetric(c.promoted, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPL7Promoted]))
+		ch <- prometheus.MustNewConstMetric(c.noEst, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPL7MatchNoEst]))
+		ch <- prometheus.MustNewConstMetric(c.postSeen, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPPostClientSeen]))
+		ch <- prometheus.MustNewConstMetric(c.postUnknown, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPPostUAUnknown]))
+		ch <- prometheus.MustNewConstMetric(c.getinfoSeen, prometheus.CounterValue, float64(sums[bpfmaps.StatTCPGetinfoSeen]))
 	}
-	emit(StatPassTCP, "pass", "tcp", "")
-	emit(StatPassUDPWhitelisted, "pass", "udp", "whitelisted")
-	emit(StatDropUDPNotWhitelisted, "drop", "udp", "not_whitelisted")
-	emit(StatDropUDPExpired, "drop", "udp", "expired")
-	emit(StatDropMalformed, "drop", "udp", "malformed")
-	emit(StatDropUDPRatelimit, "drop", "udp", "ratelimit")
-	emit(StatDropTCPInitconnectRatelimit, "drop", "tcp", "initconnect_ratelimit")
-	emit(StatDropUDPEnetMalformed, "drop", "udp", "enet_malformed")
-	emit(StatDropUDPUnhealthy, "drop", "udp", "unhealthy")
-	emit(StatDropTCPGetinfoRatelimit, "drop", "tcp", "getinfo_ratelimit")
-	emit(StatDropTCPBadUserAgent, "drop", "tcp", "bad_user_agent")
-	emit(StatDropTCPNoSyn, "drop", "tcp", "no_syn")
-	emit(StatDropTCPGlobalRatelimit, "drop", "tcp", "global_ratelimit")
-	emit(StatDropTCPTooManyOpen, "drop", "tcp", "too_many_open")
-
-	ch <- prometheus.MustNewConstMetric(c.inserts, prometheus.CounterValue, float64(sums[StatTCPEstablishedInserts]))
-	ch <- prometheus.MustNewConstMetric(c.promoted, prometheus.CounterValue, float64(sums[StatTCPL7Promoted]))
-	ch <- prometheus.MustNewConstMetric(c.noEst, prometheus.CounterValue, float64(sums[StatTCPL7MatchNoEst]))
-	ch <- prometheus.MustNewConstMetric(c.postSeen, prometheus.CounterValue, float64(sums[StatTCPPostClientSeen]))
-	ch <- prometheus.MustNewConstMetric(c.getinfoSeen, prometheus.CounterValue, float64(sums[StatTCPGetinfoSeen]))
 
 	mapSize := func(name string, v int64) {
 		if v < 0 {
@@ -304,20 +276,20 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 		ch <- prometheus.MustNewConstMetric(c.mapSize, prometheus.GaugeValue, float64(v), name)
 	}
-	mapSize("tcp_whitelist", c.sizes.whitelist.Load())
-	mapSize("tcp_established", c.sizes.established.Load())
-	mapSize("tcp_syn_seen", c.sizes.synSeen.Load())
-	mapSize("tcp_open_count", c.sizes.openCount.Load())
-	mapSize("udp_ratelimit", c.sizes.udpRL.Load())
-	mapSize("initconnect_ratelimit", c.sizes.initcRL.Load())
-	mapSize("getinfo_ratelimit", c.sizes.getinfoRL.Load())
-	mapSize("udp_health", c.sizes.health.Load())
-	mapSize("ip_drop_history", c.sizes.dropHistory.Load())
+	mapSize(bpfmaps.Whitelist, c.sizes.whitelist.Load())
+	mapSize(bpfmaps.Established, c.sizes.established.Load())
+	mapSize(bpfmaps.SynSeen, c.sizes.synSeen.Load())
+	mapSize(bpfmaps.OpenCount, c.sizes.openCount.Load())
+	mapSize(bpfmaps.UDPRatelimit, c.sizes.udpRL.Load())
+	mapSize(bpfmaps.InitConnectRatelimit, c.sizes.initcRL.Load())
+	mapSize(bpfmaps.GetInfoRatelimit, c.sizes.getinfoRL.Load())
+	mapSize(bpfmaps.Health, c.sizes.health.Load())
+	mapSize(bpfmaps.DropHistoryMap, c.sizes.dropHistory.Load())
 
 	ch <- prometheus.MustNewConstMetric(c.blacklisted, prometheus.GaugeValue, float64(c.sizes.blacklisted.Load()))
 	ch <- prometheus.MustNewConstMetric(
 		c.buildInfo, prometheus.GaugeValue, 1,
-		c.version, c.iface, fmt.Sprintf("%d", c.port),
+		c.version, c.iface, strconv.Itoa(int(c.port)),
 	)
 	ch <- prometheus.MustNewConstMetric(c.attached, prometheus.GaugeValue, boolToF(c.xdpAttached()), "xdp")
 	ch <- prometheus.MustNewConstMetric(c.attached, prometheus.GaugeValue, boolToF(c.sockopsAttached()), "sockops")

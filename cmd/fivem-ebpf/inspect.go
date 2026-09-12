@@ -4,18 +4,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
+
+	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
 func cmdInspect(args []string) {
 	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
-	pinPath := fs.String("pin-path", "/sys/fs/bpf/fivem", "bpf map pin directory")
+	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
 	watch := fs.Duration("watch", 0, "repeat every N (e.g. 1s); 0 = run once")
 	_ = fs.Parse(args)
 
@@ -24,31 +24,28 @@ func cmdInspect(args []string) {
 		os.Exit(2)
 	}
 	addr := fs.Arg(0)
-	parsed := net.ParseIP(addr)
-	if parsed == nil {
-		fmt.Fprintln(os.Stderr, "invalid IP:", addr)
+	key, err := parseIPv4Key(addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	v4 := parsed.To4()
-	if v4 == nil {
-		fmt.Fprintln(os.Stderr, "IPv4 only:", addr)
-		os.Exit(2)
-	}
-	var key [4]byte
-	copy(key[:], v4)
 
 	dump := func() {
-		now := bootTimeNS()
+		now, err := bpfmaps.BootTimeNS()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "inspect:", err)
+			os.Exit(1)
+		}
 		fmt.Printf("IP %s\n", addr)
-		inspectTimestamp(*pinPath, "tcp_whitelist", key, now)
-		inspectTimestamp(*pinPath, "tcp_established", key, now)
-		inspectTimestamp(*pinPath, "tcp_syn_seen", key, now)
-		inspectCount(*pinPath, "tcp_open_count", key)
-		inspectRatelimit(*pinPath, "udp_ratelimit", key, now)
-		inspectRatelimit(*pinPath, "initconnect_ratelimit", key, now)
-		inspectRatelimit(*pinPath, "getinfo_ratelimit", key, now)
-		inspectHealth(*pinPath, "udp_health", key, now)
-		inspectDropHistory(*pinPath, "ip_drop_history", key, now)
+		inspectTimestamp(*pinPath, bpfmaps.Whitelist, key, now)
+		inspectTimestamp(*pinPath, bpfmaps.Established, key, now)
+		inspectTimestamp(*pinPath, bpfmaps.SynSeen, key, now)
+		inspectCount(*pinPath, bpfmaps.OpenCount, key)
+		inspectRatelimit(*pinPath, bpfmaps.UDPRatelimit, key, now)
+		inspectRatelimit(*pinPath, bpfmaps.InitConnectRatelimit, key, now)
+		inspectRatelimit(*pinPath, bpfmaps.GetInfoRatelimit, key, now)
+		inspectHealth(*pinPath, bpfmaps.Health, key, now)
+		inspectDropHistory(*pinPath, bpfmaps.DropHistoryMap, key, now)
 	}
 
 	if *watch == 0 {
@@ -57,7 +54,7 @@ func cmdInspect(args []string) {
 	}
 	for {
 		fmt.Print("\x1b[H\x1b[2J")
-		fmt.Printf("# fivem-ebpf inspect — %s (refresh %s)\n", time.Now().Format(time.TimeOnly), *watch)
+		fmt.Printf("# fivem-ebpf inspect %s (refresh %s)\n", time.Now().Format(time.TimeOnly), *watch)
 		dump()
 		time.Sleep(*watch)
 	}
@@ -69,111 +66,59 @@ func inspectLine(name, body string) {
 	fmt.Printf("  %-*s %s\n", inspectLabelWidth, name, body)
 }
 
-func openPinned(pinPath, name string) (*ebpf.Map, bool) {
-	m, err := ebpf.LoadPinnedMap(filepath.Join(pinPath, name), nil)
+func lookupInto(pinPath, name string, key [4]byte, out any) bool {
+	m, err := bpfmaps.Open(pinPath, name)
 	if err != nil {
-		inspectLine(name, fmt.Sprintf("(open: %v)", err))
-		return nil, false
+		inspectLine(name, fmt.Sprintf("(%v)", err))
+		return false
 	}
-	return m, true
+	defer func() { _ = m.Close() }()
+
+	if err := m.Lookup(&key, out); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			inspectLine(name, "-")
+		} else {
+			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
+		}
+		return false
+	}
+	return true
 }
 
 func inspectTimestamp(pinPath, name string, key [4]byte, now uint64) {
-	m, ok := openPinned(pinPath, name)
-	if !ok {
-		return
-	}
-	defer func() { _ = m.Close() }()
 	var val uint64
-	if err := m.Lookup(&key, &val); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
-		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
-		}
+	if !lookupInto(pinPath, name, key, &val) {
 		return
 	}
-	age := time.Duration(int64(now) - int64(val))
-	if age < 0 {
-		age = 0
-	}
-	inspectLine(name, fmt.Sprintf("age=%s", age.Truncate(time.Second)))
+	inspectLine(name, fmt.Sprintf("age=%s", secs(ageSeconds(now, val))))
 }
 
 func inspectCount(pinPath, name string, key [4]byte) {
-	m, ok := openPinned(pinPath, name)
-	if !ok {
-		return
-	}
-	defer func() { _ = m.Close() }()
 	var val uint64
-	if err := m.Lookup(&key, &val); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
-		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
-		}
+	if !lookupInto(pinPath, name, key, &val) {
 		return
 	}
 	inspectLine(name, fmt.Sprintf("count=%d", val))
 }
 
 func inspectRatelimit(pinPath, name string, key [4]byte, now uint64) {
-	m, ok := openPinned(pinPath, name)
-	if !ok {
+	var val bpfmaps.Ratelimit
+	if !lookupInto(pinPath, name, key, &val) {
 		return
-	}
-	defer func() { _ = m.Close() }()
-	var val struct {
-		Tokens       uint64
-		LastRefillNS uint64
-	}
-	if err := m.Lookup(&key, &val); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
-		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
-		}
-		return
-	}
-	age := time.Duration(int64(now) - int64(val.LastRefillNS))
-	if age < 0 {
-		age = 0
 	}
 	inspectLine(name, fmt.Sprintf("tokens=%d refill_age=%s",
-		val.Tokens, age.Truncate(time.Second)))
+		val.Tokens, secs(ageSeconds(now, val.LastRefillNS))))
 }
 
 func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
-	m, ok := openPinned(pinPath, name)
-	if !ok {
+	var val bpfmaps.UDPHealth
+	if !lookupInto(pinPath, name, key, &val) {
 		return
-	}
-	defer func() { _ = m.Close() }()
-	var val struct {
-		Anomalies        uint32
-		_                uint32
-		WindowStartNS    uint64
-		BlacklistUntilNS uint64
-	}
-	if err := m.Lookup(&key, &val); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
-		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
-		}
-		return
-	}
-	wAge := time.Duration(int64(now) - int64(val.WindowStartNS))
-	if wAge < 0 {
-		wAge = 0
 	}
 	body := fmt.Sprintf("anomalies=%d window_age=%s",
-		val.Anomalies, wAge.Truncate(time.Second))
+		val.Anomalies, secs(ageSeconds(now, val.WindowStartNS)))
 	if val.BlacklistUntilNS > now {
-		remaining := time.Duration(int64(val.BlacklistUntilNS) - int64(now))
-		body += fmt.Sprintf(" BLACKLISTED unblock_in=%s",
-			remaining.Truncate(time.Second))
+		body += fmt.Sprintf(" BLACKLISTED unblock_in=%s", secs(ageSeconds(val.BlacklistUntilNS, now)))
 	} else {
 		body += " blacklisted=no"
 	}
@@ -181,43 +126,19 @@ func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
 }
 
 func inspectDropHistory(pinPath, name string, key [4]byte, now uint64) {
-	m, ok := openPinned(pinPath, name)
-	if !ok {
+	var val bpfmaps.DropHistory
+	if !lookupInto(pinPath, name, key, &val) {
 		return
 	}
-	defer func() { _ = m.Close() }()
-	var val struct {
-		FirstDropNS uint64
-		LastDropNS  uint64
-		Counts      [12]uint64
-	}
-	if err := m.Lookup(&key, &val); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
-		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
+	total, by := dropCounts(val)
+	parts := make([]string, 0, len(by))
+	for _, reason := range bpfmaps.DropReasonNames {
+		if c, ok := by[reason]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%d", reason, c))
 		}
-		return
-	}
-	first := time.Duration(int64(now) - int64(val.FirstDropNS))
-	if first < 0 {
-		first = 0
-	}
-	last := time.Duration(int64(now) - int64(val.LastDropNS))
-	if last < 0 {
-		last = 0
-	}
-	var total uint64
-	var parts []string
-	for i, c := range val.Counts {
-		if c == 0 {
-			continue
-		}
-		total += c
-		parts = append(parts, fmt.Sprintf("%s=%d", dropReasonNames[i], c))
 	}
 	body := fmt.Sprintf("first=%s last=%s total=%d",
-		first.Truncate(time.Second), last.Truncate(time.Second), total)
+		secs(ageSeconds(now, val.FirstDropNS)), secs(ageSeconds(now, val.LastDropNS)), total)
 	if len(parts) > 0 {
 		body += " " + strings.Join(parts, ",")
 	}
