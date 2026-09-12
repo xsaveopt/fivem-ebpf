@@ -19,9 +19,11 @@ enum fivem_stat {
     STAT_DROP_TCP_GETINFO_RATELIMIT      = 14,
     STAT_DROP_TCP_BAD_USER_AGENT         = 15,
     STAT_DROP_TCP_NO_SYN                 = 16,
-    STAT_DROP_TCP_GLOBAL_RATELIMIT        = 17,
+    STAT_DROP_TCP_GLOBAL_RATELIMIT       = 17,
     STAT_DROP_TCP_TOO_MANY_OPEN          = 18,
-    STAT_MAX                             = 19,
+    STAT_TCP_POST_UA_UNKNOWN             = 19,
+    STAT_DROP_IP_FRAGMENT                = 20,
+    STAT_MAX                             = 21,
 };
 
 #endif

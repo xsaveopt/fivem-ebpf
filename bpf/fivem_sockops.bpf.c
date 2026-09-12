@@ -21,7 +21,7 @@ static __always_inline void open_count_inc(__be32 src) {
 
 static __always_inline void open_count_dec(__be32 src) {
     __u64 *count = bpf_map_lookup_elem(&tcp_open_count, &src);
-    if (count && *count > 0)
+    if (count && (__s64)*count > 0)
         __sync_fetch_and_sub(count, 1);
 }
 

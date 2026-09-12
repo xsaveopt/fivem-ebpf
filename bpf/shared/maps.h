@@ -89,7 +89,7 @@ struct {
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } udp_health SEC(".maps");
 
-#define NUM_DROP_REASONS 12
+#define NUM_DROP_REASONS 13
 
 enum drop_reason_idx {
     DROP_REASON_TCP_NO_SYN                = 0,
@@ -104,6 +104,7 @@ enum drop_reason_idx {
     DROP_REASON_UDP_UNHEALTHY             = 9,
     DROP_REASON_UDP_ENET_MALFORMED        = 10,
     DROP_REASON_UDP_RATELIMIT             = 11,
+    DROP_REASON_IP_FRAGMENT               = 12,
 };
 
 struct ip_drop_history {
