@@ -1,0 +1,39 @@
+name: setup-bpf
+description: Install the clang and bpftool toolchain, then generate vmlinux.h and the bpf2go objects.
+
+inputs:
+  bpftool-version:
+    description: bpftool release tag to install
+    required: false
+    default: v7.7.0
+  bpftool-sha256:
+    description: sha256 of the bpftool amd64 release tarball
+    required: false
+    default: 09150596f09356b0ff632dd7f9856e0ea86bf96b269e9bc94278d9a9432a268c
+
+runs:
+  using: composite
+  steps:
+    - name: install clang/llvm/libbpf
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          clang llvm libbpf-dev libelf-dev zip
+
+    - name: install bpftool
+      shell: bash
+      run: |
+        curl -sfL -o /tmp/bpftool.tar.gz \
+          "https://github.com/libbpf/bpftool/releases/download/${{ inputs.bpftool-version }}/bpftool-${{ inputs.bpftool-version }}-amd64.tar.gz"
+        echo "${{ inputs.bpftool-sha256 }}  /tmp/bpftool.tar.gz" | sha256sum -c -
+        sudo tar -xzf /tmp/bpftool.tar.gz -C /usr/local/bin bpftool
+        sudo chmod 0755 /usr/local/bin/bpftool
+        bpftool version
+
+    - name: generate vmlinux.h and bpf objects
+      shell: bash
+      run: |
+        sudo -E scripts/gen-vmlinux.sh
+        sudo chown "$(id -u):$(id -g)" bpf/vmlinux.h
+        go generate ./...

@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  VT_API_KEY: ${{ secrets.VT_API_KEY }}
+
+jobs:
+  ci:
+    name: Lint, test & build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: ./.github/actions/setup-bpf
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "::error::gofmt found issues; run 'gofmt -w .'"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - name: go vet linux/arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+        run: go vet ./...
+
+      - run: go test ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: verifier load check
+        run: |
+          sudo mount -t bpf bpffs /sys/fs/bpf 2>/dev/null || true
+          sudo bpftool prog load internal/loader/fivemxdp_bpfel.o /sys/fs/bpf/ci_xdp type xdp
+          sudo bpftool prog load internal/loader/fivemsockops_bpfel.o /sys/fs/bpf/ci_sockops type sockops
+          sudo rm -f /sys/fs/bpf/ci_xdp /sys/fs/bpf/ci_sockops
+
+      - name: cross-build linux/amd64+arm64
+        run: make release VERSION="dev-${GITHUB_SHA::7}"
+
+      - name: package
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          for arch in amd64 arm64; do
+            scripts/package.sh "$arch" "dev-${GITHUB_SHA::7}"
+          done
+
+      - name: scan with VirusTotal
+        if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v') && env.VT_API_KEY != '' }}
+        uses: crazy-max/ghaction-virustotal@v5
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          request_rate: 4
+          files: dist/fivem-ebpf-linux-*
+
+      - name: VirusTotal summary
+        if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v') && env.VT_API_KEY != '' }}
+        run: |
+          {
+            echo "### VirusTotal scans"
+            echo
+            echo "Artifacts download as a zip; hash the extracted binary, not the zip."
+            echo
+            for f in dist/fivem-ebpf-linux-*; do
+              sha=$(sha256sum "$f" | cut -d ' ' -f1)
+              echo "- [$(basename "$f")](https://www.virustotal.com/gui/file/$sha) \`$sha\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload dev build
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: fivem-ebpf-dev-${{ github.sha }}
+          path: dist/fivem-ebpf-dev-*.zip*
+          retention-days: 14
+
+  release:
+    name: Publish release
+    needs: ci
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: ./.github/actions/setup-bpf
+
+      - name: build and package
+        run: |
+          make release VERSION="${GITHUB_REF_NAME}"
+          for arch in amd64 arm64; do
+            scripts/package.sh "$arch" "${GITHUB_REF_NAME}"
+          done
+          ls -l dist
+
+      - name: scan with VirusTotal
+        if: ${{ env.VT_API_KEY != '' }}
+        uses: crazy-max/ghaction-virustotal@v5
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          request_rate: 4
+          files: dist/fivem-ebpf-linux-*
+
+      - name: VirusTotal summary
+        id: vtsum
+        if: ${{ env.VT_API_KEY != '' }}
+        run: |
+          {
+            echo "results<<EOF"
+            echo "### VirusTotal scans"
+            for f in dist/fivem-ebpf-linux-*; do
+              sha=$(sha256sum "$f" | cut -d ' ' -f1)
+              echo "- [$(basename "$f")](https://www.virustotal.com/gui/file/$sha)"
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/fivem-ebpf-*-linux-*.zip
+            dist/fivem-ebpf-*-linux-*.zip.sha256
+          body: ${{ steps.vtsum.outputs.results }}
+          fail_on_unmatched_files: true
+          draft: false
+          generate_release_notes: true
