@@ -184,30 +184,21 @@ func loadXDP(opts Options) (*fivemXDPObjects, error) {
 	if err := setVar(spec, "whitelist_ttl_ns", uint64(opts.TTL.Nanoseconds())); err != nil {
 		return nil, err
 	}
-	var udpPeriodNs uint64
-	if opts.UDPRatePerSec > 0 {
-		udpPeriodNs = 1_000_000_000 / opts.UDPRatePerSec
-	}
+	udpPeriodNs := periodNS(nsPerSec, opts.UDPRatePerSec)
 	if err := setVar(spec, "udp_refill_period_ns", udpPeriodNs); err != nil {
 		return nil, err
 	}
 	if err := setVar(spec, "udp_burst", opts.UDPBurst); err != nil {
 		return nil, err
 	}
-	var initPeriodNs uint64
-	if opts.InitConnectPerMin > 0 {
-		initPeriodNs = (60 * 1_000_000_000) / opts.InitConnectPerMin
-	}
+	initPeriodNs := periodNS(nsPerMin, opts.InitConnectPerMin)
 	if err := setVar(spec, "initconnect_period_ns", initPeriodNs); err != nil {
 		return nil, err
 	}
 	if err := setVar(spec, "initconnect_burst", opts.InitConnectBurst); err != nil {
 		return nil, err
 	}
-	var getInfoPeriodNs uint64
-	if opts.GetInfoPerMin > 0 {
-		getInfoPeriodNs = (60 * 1_000_000_000) / opts.GetInfoPerMin
-	}
+	getInfoPeriodNs := periodNS(nsPerMin, opts.GetInfoPerMin)
 	if err := setVar(spec, "getinfo_period_ns", getInfoPeriodNs); err != nil {
 		return nil, err
 	}
@@ -216,21 +207,8 @@ func loadXDP(opts Options) (*fivemXDPObjects, error) {
 	}
 
 	ncpu := runtime.NumCPU()
-	if ncpu <= 0 {
-		ncpu = 1
-	}
-	var tcpGlobalPeriodNs uint64
-	if opts.TCPGlobalPerSec > 0 {
-		perCPURate := opts.TCPGlobalPerSec / uint64(ncpu)
-		if perCPURate == 0 {
-			perCPURate = 1
-		}
-		tcpGlobalPeriodNs = 1_000_000_000 / perCPURate
-	}
-	tcpGlobalBurstPerCPU := opts.TCPGlobalBurst / uint64(ncpu)
-	if opts.TCPGlobalBurst > 0 && tcpGlobalBurstPerCPU == 0 {
-		tcpGlobalBurstPerCPU = 1
-	}
+	tcpGlobalPeriodNs := periodNS(nsPerSec, perCPU(opts.TCPGlobalPerSec, ncpu))
+	tcpGlobalBurstPerCPU := perCPU(opts.TCPGlobalBurst, ncpu)
 	if err := setVar(spec, "tcp_global_period_ns", tcpGlobalPeriodNs); err != nil {
 		return nil, err
 	}
@@ -289,6 +267,28 @@ func loadSockops(opts Options) (*fivemSockopsObjects, error) {
 		return nil, wrapLoadError("sockops", opts.PinPath, err)
 	}
 	return obj, nil
+}
+
+const (
+	nsPerSec = 1_000_000_000
+	nsPerMin = 60 * nsPerSec
+)
+
+func periodNS(unit, rate uint64) uint64 {
+	if rate == 0 {
+		return 0
+	}
+	return unit / rate
+}
+
+func perCPU(v uint64, ncpu int) uint64 {
+	if v == 0 {
+		return 0
+	}
+	if ncpu <= 1 {
+		return v
+	}
+	return max(v/uint64(ncpu), 1)
 }
 
 func setVar(spec *ebpf.CollectionSpec, name string, value any) error {

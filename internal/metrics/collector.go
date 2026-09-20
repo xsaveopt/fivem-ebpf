@@ -40,6 +40,8 @@ type Collector struct {
 
 	sizes MapSizes
 
+	readStats func(m *ebpf.Map) ([]uint64, error)
+
 	packets     *prometheus.Desc
 	inserts     *prometheus.Desc
 	promoted    *prometheus.Desc
@@ -88,6 +90,7 @@ func NewCollector(
 		getinfoRLMap:   maps.GetinfoRL,
 		healthMap:      maps.Health,
 		dropHistoryMap: maps.DropHistory,
+		readStats:      bpfmaps.ReadStats,
 		packets: prometheus.NewDesc(
 			"fivem_xdp_packets_total",
 			"Packets observed by the FiveM XDP filter.",
@@ -192,7 +195,12 @@ func (c *Collector) refreshSizes() {
 	store(&c.sizes.getinfoRL, bpfmaps.GetInfoRatelimit, c.getinfoRLMap)
 	store(&c.sizes.dropHistory, bpfmaps.DropHistoryMap, c.dropHistoryMap)
 
-	total, blacklisted, err := countHealth(c.healthMap)
+	now, err := bpfmaps.BootTimeNS()
+	if err != nil {
+		log.Printf("map-size %s: %v (keeping previous value)", bpfmaps.Health, err)
+		return
+	}
+	total, blacklisted, err := countHealth(bpfmaps.NewReader(c.healthMap), now)
 	if err != nil {
 		log.Printf("map-size %s: %v (keeping previous value)", bpfmaps.Health, err)
 		return
@@ -201,13 +209,9 @@ func (c *Collector) refreshSizes() {
 	c.sizes.blacklisted.Store(blacklisted)
 }
 
-func countHealth(m *ebpf.Map) (total, blacklisted int64, err error) {
+func countHealth(m bpfmaps.Reader, now uint64) (total, blacklisted int64, err error) {
 	if m == nil {
 		return -1, -1, nil
-	}
-	now, err := bpfmaps.BootTimeNS()
-	if err != nil {
-		return 0, 0, err
 	}
 	var key [4]byte
 	var val bpfmaps.UDPHealth
@@ -236,7 +240,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
-	sums, err := bpfmaps.ReadStats(c.stats)
+	sums, err := c.readStats(c.stats)
 	if err != nil {
 		log.Printf("metrics: read stats: %v", err)
 	} else {

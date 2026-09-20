@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/cilium/ebpf"
+
 	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
@@ -18,13 +20,17 @@ type fakeEntry struct {
 }
 
 type fakeMap struct {
-	entries []fakeEntry
-	iterErr error
+	entries   []fakeEntry
+	iterErr   error
+	lookupErr error
 }
 
 func (f *fakeMap) Iterate() bpfmaps.Iterator { return &fakeIter{m: f} }
 
 func (f *fakeMap) Lookup(key, valueOut any) error {
+	if f.lookupErr != nil {
+		return f.lookupErr
+	}
 	k := *key.(*[4]byte)
 	for _, e := range f.entries {
 		if e.key == k {
@@ -32,7 +38,7 @@ func (f *fakeMap) Lookup(key, valueOut any) error {
 			return nil
 		}
 	}
-	return errors.New("not found")
+	return ebpf.ErrKeyNotExist
 }
 
 type fakeIter struct {

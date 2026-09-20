@@ -12,48 +12,56 @@ import (
 	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
-func cmdClear(args []string) {
-	fs := flag.NewFlagSet("clear", flag.ExitOnError)
-	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
-	which := fs.String("map", "whitelist", "which map to clear: "+bpfmaps.CLINamesHelp+" | all")
-	ipFlag := fs.String("ip", "", "if set, only clear this single IPv4 from the target map(s) instead of wiping every entry")
-	_ = fs.Parse(args)
+type clearOpts struct {
+	pinPath string
+	which   string
+	ip      string
+}
 
-	var targets []string
-	if *which == "all" {
-		targets = bpfmaps.PerIP
-	} else {
-		name, ok := bpfmaps.CLIName[*which]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "unknown map: %s (one of %s | all)\n", *which, bpfmaps.CLINamesHelp)
-			os.Exit(2)
-		}
-		targets = []string{name}
+func parseClearFlags(args []string) (clearOpts, error) {
+	var o clearOpts
+	fs := flag.NewFlagSet("clear", flag.ContinueOnError)
+	fs.StringVar(&o.pinPath, "pin-path", defaultPinPath, pinPathHelp)
+	fs.StringVar(&o.which, "map", "whitelist", "which map to clear: "+bpfmaps.CLINamesHelp+" | all")
+	fs.StringVar(&o.ip, "ip", "", "if set, only clear this single IPv4 from the target map(s) instead of wiping every entry")
+	return o, fs.Parse(args)
+}
+
+func cmdClear(args []string) {
+	o, err := parseClearFlags(args)
+	if err != nil {
+		exitFlagError(err)
 	}
 
-	if *ipFlag != "" {
-		key, err := parseIPv4Key(*ipFlag)
+	targets, err := resolveMapTargets(o.which)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+
+	if o.ip != "" {
+		key, err := parseIPv4Key(o.ip)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		for _, name := range targets {
-			n, err := clearMapKey(*pinPath, name, key)
+			n, err := clearMapKey(o.pinPath, name, key)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 				continue
 			}
 			if n == 1 {
-				fmt.Printf("%s: removed %s\n", name, *ipFlag)
+				fmt.Printf("%s: removed %s\n", name, o.ip)
 			} else {
-				fmt.Printf("%s: %s not present\n", name, *ipFlag)
+				fmt.Printf("%s: %s not present\n", name, o.ip)
 			}
 		}
 		return
 	}
 
 	for _, name := range targets {
-		n, err := clearWholeMap(*pinPath, name)
+		n, err := clearWholeMap(o.pinPath, name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 			continue
@@ -76,6 +84,11 @@ func parseIPv4Key(s string) ([4]byte, error) {
 	return key, nil
 }
 
+type mapMutator interface {
+	NextKey(key, nextKeyOut any) error
+	Delete(key any) error
+}
+
 func clearMapKey(pinPath, name string, key [4]byte) (int, error) {
 	m, err := bpfmaps.Open(pinPath, name)
 	if err != nil {
@@ -83,13 +96,7 @@ func clearMapKey(pinPath, name string, key [4]byte) (int, error) {
 	}
 	defer func() { _ = m.Close() }()
 
-	if err := m.Delete(&key); err != nil {
-		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return 1, nil
+	return deleteKey(m, key)
 }
 
 func clearWholeMap(pinPath, name string) (int, error) {
@@ -99,6 +106,20 @@ func clearWholeMap(pinPath, name string) (int, error) {
 	}
 	defer func() { _ = m.Close() }()
 
+	return deleteAllKeys(m)
+}
+
+func deleteKey(m mapMutator, key [4]byte) (int, error) {
+	if err := m.Delete(&key); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return 1, nil
+}
+
+func deleteAllKeys(m mapMutator) (int, error) {
 	keys, err := collectKeys(m)
 	if err != nil {
 		return 0, err
@@ -111,7 +132,7 @@ func clearWholeMap(pinPath, name string) (int, error) {
 	return len(keys), nil
 }
 
-func collectKeys(m *ebpf.Map) ([][4]byte, error) {
+func collectKeys(m mapMutator) ([][4]byte, error) {
 	var keys [][4]byte
 	var cur, next [4]byte
 	var prev any

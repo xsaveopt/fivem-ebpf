@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -10,123 +11,117 @@ import (
 	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
-func cmdDump(args []string) {
-	fs := flag.NewFlagSet("dump", flag.ExitOnError)
-	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
-	which := fs.String("map", "whitelist", "which map to dump: "+bpfmaps.CLINamesHelp+" | all")
-	_ = fs.Parse(args)
-
-	if *which == "all" {
-		for _, name := range bpfmaps.PerIP {
-			fmt.Printf("== %s ==\n", name)
-			dumpMap(*pinPath, name)
-			fmt.Println()
-		}
-		return
-	}
-
-	name, ok := bpfmaps.CLIName[*which]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown map: %s (one of %s | all)\n", *which, bpfmaps.CLINamesHelp)
-		os.Exit(2)
-	}
-	dumpMap(*pinPath, name)
+type dumpOpts struct {
+	pinPath string
+	which   string
 }
 
-func dumpMap(pinPath, name string) {
-	var err error
+func parseDumpFlags(args []string) (dumpOpts, error) {
+	var o dumpOpts
+	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
+	fs.StringVar(&o.pinPath, "pin-path", defaultPinPath, pinPathHelp)
+	fs.StringVar(&o.which, "map", "whitelist", "which map to dump: "+bpfmaps.CLINamesHelp+" | all")
+	return o, fs.Parse(args)
+}
+
+func cmdDump(args []string) {
+	o, err := parseDumpFlags(args)
+	if err != nil {
+		exitFlagError(err)
+	}
+
+	targets, err := resolveMapTargets(o.which)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+
+	for _, name := range targets {
+		if len(targets) > 1 {
+			fmt.Printf("== %s ==\n", name)
+		}
+		if err := dumpNamedMap(os.Stdout, o.pinPath, name); err != nil {
+			fmt.Fprintln(os.Stderr, "dump:", err)
+		}
+		if len(targets) > 1 {
+			fmt.Println()
+		}
+	}
+}
+
+type dumpRenderer func(w io.Writer, m bpfmaps.Reader, now uint64) error
+
+func dumpRendererFor(name string) (dumpRenderer, error) {
 	switch name {
 	case bpfmaps.Whitelist, bpfmaps.Established, bpfmaps.SynSeen:
-		err = dumpTimestampMap(pinPath, name)
+		return writeTimestampDump, nil
 	case bpfmaps.OpenCount:
-		err = dumpCountMap(pinPath, name)
+		return writeCountDump, nil
 	case bpfmaps.UDPRatelimit, bpfmaps.InitConnectRatelimit, bpfmaps.GetInfoRatelimit:
-		err = dumpRatelimitMap(pinPath, name)
+		return writeRatelimitDump, nil
 	case bpfmaps.Health:
-		err = dumpHealthMap(pinPath, name)
+		return writeHealthDump, nil
 	case bpfmaps.DropHistoryMap:
-		err = dumpDropHistoryMap(pinPath, name)
-	default:
-		err = fmt.Errorf("no dump format for %s", name)
+		return writeDropHistoryDump, nil
 	}
+	return nil, fmt.Errorf("no dump format for %s", name)
+}
+
+func dumpNamedMap(w io.Writer, pinPath, name string) error {
+	render, err := dumpRendererFor(name)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "dump:", err)
+		return err
 	}
+	m, err := bpfmaps.Open(pinPath, name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Close() }()
+
+	now, err := bpfmaps.BootTimeNS()
+	if err != nil {
+		return err
+	}
+	return render(w, bpfmaps.Map{M: m}, now)
 }
 
 func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
 
-func dumpTimestampMap(pinPath, name string) error {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = m.Close() }()
-
-	now, err := bpfmaps.BootTimeNS()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%-16s %-12s\n", "IP", "AGE")
+func writeTimestampDump(w io.Writer, m bpfmaps.Reader, now uint64) error {
+	outf(w, "%-16s %-12s\n", "IP", "AGE")
 	var key [4]byte
 	var val uint64
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
-		fmt.Printf("%-16s %-12s\n", ipv4Str(key), secs(ageSeconds(now, val)))
+		outf(w, "%-16s %-12s\n", ipv4Str(key), secs(ageSeconds(now, val)))
 	}
 	return iter.Err()
 }
 
-func dumpCountMap(pinPath, name string) error {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = m.Close() }()
-
-	fmt.Printf("%-16s %-10s\n", "IP", "OPEN")
+func writeCountDump(w io.Writer, m bpfmaps.Reader, _ uint64) error {
+	outf(w, "%-16s %-10s\n", "IP", "OPEN")
 	var key [4]byte
 	var val uint64
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
-		fmt.Printf("%-16s %-10d\n", ipv4Str(key), val)
+		outf(w, "%-16s %-10d\n", ipv4Str(key), val)
 	}
 	return iter.Err()
 }
 
-func dumpRatelimitMap(pinPath, name string) error {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = m.Close() }()
-
-	now, err := bpfmaps.BootTimeNS()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%-16s %-10s %-12s\n", "IP", "TOKENS", "LAST_REFILL")
+func writeRatelimitDump(w io.Writer, m bpfmaps.Reader, now uint64) error {
+	outf(w, "%-16s %-10s %-12s\n", "IP", "TOKENS", "LAST_REFILL")
 	var key [4]byte
 	var val bpfmaps.Ratelimit
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
-		fmt.Printf("%-16s %-10d %-12s\n", ipv4Str(key), val.Tokens, secs(ageSeconds(now, val.LastRefillNS)))
+		outf(w, "%-16s %-10d %-12s\n", ipv4Str(key), val.Tokens, secs(ageSeconds(now, val.LastRefillNS)))
 	}
 	return iter.Err()
 }
 
-func dumpHealthMap(pinPath, name string) error {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = m.Close() }()
-
-	now, err := bpfmaps.BootTimeNS()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%-16s %-10s %-12s %-12s\n", "IP", "ANOMALIES", "WINDOW_AGE", "BLACKLIST")
+func writeHealthDump(w io.Writer, m bpfmaps.Reader, now uint64) error {
+	outf(w, "%-16s %-10s %-12s %-12s\n", "IP", "ANOMALIES", "WINDOW_AGE", "BLACKLIST")
 	var key [4]byte
 	var val bpfmaps.UDPHealth
 	iter := m.Iterate()
@@ -135,41 +130,35 @@ func dumpHealthMap(pinPath, name string) error {
 		if val.BlacklistUntilNS > now {
 			bl = "in " + secs(ageSeconds(val.BlacklistUntilNS, now)).String()
 		}
-		fmt.Printf("%-16s %-10d %-12s %-12s\n",
+		outf(w, "%-16s %-10d %-12s %-12s\n",
 			ipv4Str(key), val.Anomalies, secs(ageSeconds(now, val.WindowStartNS)), bl)
 	}
 	return iter.Err()
 }
 
-func dumpDropHistoryMap(pinPath, name string) error {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = m.Close() }()
-
-	now, err := bpfmaps.BootTimeNS()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%-16s %-12s %-12s %-10s %s\n", "IP", "FIRST_AGE", "LAST_AGE", "TOTAL", "BY_REASON")
+func writeDropHistoryDump(w io.Writer, m bpfmaps.Reader, now uint64) error {
+	outf(w, "%-16s %-12s %-12s %-10s %s\n", "IP", "FIRST_AGE", "LAST_AGE", "TOTAL", "BY_REASON")
 	var key [4]byte
 	var val bpfmaps.DropHistory
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
 		total, by := dropCounts(val)
-		parts := make([]string, 0, len(by))
-		for _, reason := range bpfmaps.DropReasonNames {
-			if c, ok := by[reason]; ok {
-				parts = append(parts, fmt.Sprintf("%s=%d", reason, c))
-			}
-		}
-		fmt.Printf("%-16s %-12s %-12s %-10d %s\n",
+		outf(w, "%-16s %-12s %-12s %-10d %s\n",
 			ipv4Str(key),
 			secs(ageSeconds(now, val.FirstDropNS)),
 			secs(ageSeconds(now, val.LastDropNS)),
 			total,
-			strings.Join(parts, ","))
+			strings.Join(dropReasonParts(by), ","))
 	}
 	return iter.Err()
+}
+
+func dropReasonParts(by map[string]uint64) []string {
+	parts := make([]string, 0, len(by))
+	for _, reason := range bpfmaps.DropReasonNames {
+		if c, ok := by[reason]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%d", reason, c))
+		}
+	}
+	return parts
 }

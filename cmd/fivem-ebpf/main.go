@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
@@ -45,6 +48,28 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+}
+
+func outf(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
+func exitFlagError(err error) {
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
+	}
+	os.Exit(2)
+}
+
+func resolveMapTargets(which string) ([]string, error) {
+	if which == "all" {
+		return bpfmaps.PerIP, nil
+	}
+	name, ok := bpfmaps.CLIName[which]
+	if !ok {
+		return nil, fmt.Errorf("unknown map: %s (one of %s | all)", which, bpfmaps.CLINamesHelp)
+	}
+	return []string{name}, nil
 }
 
 func usage() {

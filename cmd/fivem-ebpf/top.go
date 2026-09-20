@@ -141,13 +141,7 @@ func topRows(m bpfmaps.Reader, kind string, now uint64, n, reasonIdx int, withDi
 				AgeSeconds: ageSeconds(now, v.LastDropNS),
 			}
 			if withDisplay {
-				parts := make([]string, 0, len(by))
-				for _, name := range bpfmaps.DropReasonNames {
-					if c, ok := by[name]; ok {
-						parts = append(parts, fmt.Sprintf("%s=%d", name, c))
-					}
-				}
-				row.Display = fmt.Sprintf("total=%d %s", total, strings.Join(parts, ","))
+				row.Display = fmt.Sprintf("total=%d %s", total, strings.Join(dropReasonParts(by), ","))
 			}
 			rows = append(rows, row)
 		}
@@ -166,15 +160,30 @@ func topRows(m bpfmaps.Reader, kind string, now uint64, n, reasonIdx int, withDi
 	return rows, nil
 }
 
-func cmdTop(args []string) {
-	fs := flag.NewFlagSet("top", flag.ExitOnError)
-	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
-	which := fs.String("map", "open-count", "which map: "+bpfmaps.CLINamesHelp)
-	n := fs.Int("n", 10, "max entries to print (0 for all)")
-	reason := fs.String("reason", "", "for --map drop-history: rank by this reason instead of total drops (e.g. tcp_too_many_open)")
-	_ = fs.Parse(args)
+type topOpts struct {
+	pinPath string
+	which   string
+	n       int
+	reason  string
+}
 
-	if err := printTop(*pinPath, *which, *reason, *n); err != nil {
+func parseTopFlags(args []string) (topOpts, error) {
+	var o topOpts
+	fs := flag.NewFlagSet("top", flag.ContinueOnError)
+	fs.StringVar(&o.pinPath, "pin-path", defaultPinPath, pinPathHelp)
+	fs.StringVar(&o.which, "map", "open-count", "which map: "+bpfmaps.CLINamesHelp)
+	fs.IntVar(&o.n, "n", 10, "max entries to print (0 for all)")
+	fs.StringVar(&o.reason, "reason", "", "for --map drop-history: rank by this reason instead of total drops (e.g. tcp_too_many_open)")
+	return o, fs.Parse(args)
+}
+
+func cmdTop(args []string) {
+	o, err := parseTopFlags(args)
+	if err != nil {
+		exitFlagError(err)
+	}
+
+	if err := printTop(o.pinPath, o.which, o.reason, o.n); err != nil {
 		fmt.Fprintln(os.Stderr, "top:", err)
 		os.Exit(1)
 	}

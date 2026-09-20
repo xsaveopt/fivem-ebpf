@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -13,18 +14,34 @@ import (
 	"github.com/xsaveopt/fivem-ebpf/internal/bpfmaps"
 )
 
-func cmdInspect(args []string) {
-	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
-	pinPath := fs.String("pin-path", defaultPinPath, pinPathHelp)
-	watch := fs.Duration("watch", 0, "repeat every N (e.g. 1s); 0 = run once")
-	_ = fs.Parse(args)
+type inspectOpts struct {
+	pinPath string
+	watch   time.Duration
+	addr    string
+}
 
-	if fs.NArg() == 0 {
+func parseInspectFlags(args []string) (inspectOpts, error) {
+	var o inspectOpts
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	fs.StringVar(&o.pinPath, "pin-path", defaultPinPath, pinPathHelp)
+	fs.DurationVar(&o.watch, "watch", 0, "repeat every N (e.g. 1s); 0 = run once")
+	if err := fs.Parse(args); err != nil {
+		return o, err
+	}
+	o.addr = fs.Arg(0)
+	return o, nil
+}
+
+func cmdInspect(args []string) {
+	o, err := parseInspectFlags(args)
+	if err != nil {
+		exitFlagError(err)
+	}
+	if o.addr == "" {
 		fmt.Fprintln(os.Stderr, "usage: fivem-ebpf inspect <ipv4> [--watch 1s]")
 		os.Exit(2)
 	}
-	addr := fs.Arg(0)
-	key, err := parseIPv4Key(addr)
+	key, err := parseIPv4Key(o.addr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -36,83 +53,97 @@ func cmdInspect(args []string) {
 			fmt.Fprintln(os.Stderr, "inspect:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("IP %s\n", addr)
-		inspectTimestamp(*pinPath, bpfmaps.Whitelist, key, now)
-		inspectTimestamp(*pinPath, bpfmaps.Established, key, now)
-		inspectTimestamp(*pinPath, bpfmaps.SynSeen, key, now)
-		inspectCount(*pinPath, bpfmaps.OpenCount, key)
-		inspectRatelimit(*pinPath, bpfmaps.UDPRatelimit, key, now)
-		inspectRatelimit(*pinPath, bpfmaps.InitConnectRatelimit, key, now)
-		inspectRatelimit(*pinPath, bpfmaps.GetInfoRatelimit, key, now)
-		inspectHealth(*pinPath, bpfmaps.Health, key, now)
-		inspectDropHistory(*pinPath, bpfmaps.DropHistoryMap, key, now)
+		inspectAll(os.Stdout, o.pinPath, o.addr, key, now)
 	}
 
-	if *watch == 0 {
+	if o.watch == 0 {
 		dump()
 		return
 	}
 	for {
 		fmt.Print("\x1b[H\x1b[2J")
-		fmt.Printf("# fivem-ebpf inspect %s (refresh %s)\n", time.Now().Format(time.TimeOnly), *watch)
+		fmt.Printf("# fivem-ebpf inspect %s (refresh %s)\n", time.Now().Format(time.TimeOnly), o.watch)
 		dump()
-		time.Sleep(*watch)
+		time.Sleep(o.watch)
 	}
 }
 
 const inspectLabelWidth = 22
 
-func inspectLine(name, body string) {
-	fmt.Printf("  %-*s %s\n", inspectLabelWidth, name, body)
+type inspectStep struct {
+	name   string
+	render func(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, now uint64)
 }
 
-func lookupInto(pinPath, name string, key [4]byte, out any) bool {
-	m, err := bpfmaps.Open(pinPath, name)
-	if err != nil {
-		inspectLine(name, fmt.Sprintf("(%v)", err))
-		return false
-	}
-	defer func() { _ = m.Close() }()
+var inspectSteps = []inspectStep{
+	{bpfmaps.Whitelist, inspectTimestamp},
+	{bpfmaps.Established, inspectTimestamp},
+	{bpfmaps.SynSeen, inspectTimestamp},
+	{bpfmaps.OpenCount, inspectCount},
+	{bpfmaps.UDPRatelimit, inspectRatelimit},
+	{bpfmaps.InitConnectRatelimit, inspectRatelimit},
+	{bpfmaps.GetInfoRatelimit, inspectRatelimit},
+	{bpfmaps.Health, inspectHealth},
+	{bpfmaps.DropHistoryMap, inspectDropHistory},
+}
 
+func inspectAll(w io.Writer, pinPath, addr string, key [4]byte, now uint64) {
+	outf(w, "IP %s\n", addr)
+	for _, step := range inspectSteps {
+		m, err := bpfmaps.Open(pinPath, step.name)
+		if err != nil {
+			inspectLine(w, step.name, fmt.Sprintf("(%v)", err))
+			continue
+		}
+		step.render(w, bpfmaps.Map{M: m}, step.name, key, now)
+		_ = m.Close()
+	}
+}
+
+func inspectLine(w io.Writer, name, body string) {
+	outf(w, "  %-*s %s\n", inspectLabelWidth, name, body)
+}
+
+func lookupInto(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, out any) bool {
 	if err := m.Lookup(&key, out); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
-			inspectLine(name, "-")
+			inspectLine(w, name, "-")
 		} else {
-			inspectLine(name, fmt.Sprintf("(lookup: %v)", err))
+			inspectLine(w, name, fmt.Sprintf("(lookup: %v)", err))
 		}
 		return false
 	}
 	return true
 }
 
-func inspectTimestamp(pinPath, name string, key [4]byte, now uint64) {
+func inspectTimestamp(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, now uint64) {
 	var val uint64
-	if !lookupInto(pinPath, name, key, &val) {
+	if !lookupInto(w, m, name, key, &val) {
 		return
 	}
-	inspectLine(name, fmt.Sprintf("age=%s", secs(ageSeconds(now, val))))
+	inspectLine(w, name, fmt.Sprintf("age=%s", secs(ageSeconds(now, val))))
 }
 
-func inspectCount(pinPath, name string, key [4]byte) {
+func inspectCount(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, _ uint64) {
 	var val uint64
-	if !lookupInto(pinPath, name, key, &val) {
+	if !lookupInto(w, m, name, key, &val) {
 		return
 	}
-	inspectLine(name, fmt.Sprintf("count=%d", val))
+	inspectLine(w, name, fmt.Sprintf("count=%d", val))
 }
 
-func inspectRatelimit(pinPath, name string, key [4]byte, now uint64) {
+func inspectRatelimit(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, now uint64) {
 	var val bpfmaps.Ratelimit
-	if !lookupInto(pinPath, name, key, &val) {
+	if !lookupInto(w, m, name, key, &val) {
 		return
 	}
-	inspectLine(name, fmt.Sprintf("tokens=%d refill_age=%s",
+	inspectLine(w, name, fmt.Sprintf("tokens=%d refill_age=%s",
 		val.Tokens, secs(ageSeconds(now, val.LastRefillNS))))
 }
 
-func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
+func inspectHealth(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, now uint64) {
 	var val bpfmaps.UDPHealth
-	if !lookupInto(pinPath, name, key, &val) {
+	if !lookupInto(w, m, name, key, &val) {
 		return
 	}
 	body := fmt.Sprintf("anomalies=%d window_age=%s",
@@ -122,25 +153,19 @@ func inspectHealth(pinPath, name string, key [4]byte, now uint64) {
 	} else {
 		body += " blacklisted=no"
 	}
-	inspectLine(name, body)
+	inspectLine(w, name, body)
 }
 
-func inspectDropHistory(pinPath, name string, key [4]byte, now uint64) {
+func inspectDropHistory(w io.Writer, m bpfmaps.Reader, name string, key [4]byte, now uint64) {
 	var val bpfmaps.DropHistory
-	if !lookupInto(pinPath, name, key, &val) {
+	if !lookupInto(w, m, name, key, &val) {
 		return
 	}
 	total, by := dropCounts(val)
-	parts := make([]string, 0, len(by))
-	for _, reason := range bpfmaps.DropReasonNames {
-		if c, ok := by[reason]; ok {
-			parts = append(parts, fmt.Sprintf("%s=%d", reason, c))
-		}
-	}
 	body := fmt.Sprintf("first=%s last=%s total=%d",
 		secs(ageSeconds(now, val.FirstDropNS)), secs(ageSeconds(now, val.LastDropNS)), total)
-	if len(parts) > 0 {
+	if parts := dropReasonParts(by); len(parts) > 0 {
 		body += " " + strings.Join(parts, ",")
 	}
-	inspectLine(name, body)
+	inspectLine(w, name, body)
 }
