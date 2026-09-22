@@ -19,7 +19,7 @@ It needs Linux 5.17 or newer with BTF, cgroup v2, and a kernel whose driver supp
 Settings live in /etc/fivem-ebpf/config and each key is explained in the file.
 fivem-ebpf run --help prints the same list with its defaults, and fivem-ebpf on its own lists the subcommands for reading the filter's state.
 
-/metrics and a read only JSON API under /api are served on METRICS_ADDR.
+/metrics, /health and a read only JSON API under /api are served on METRICS_ADDR.
 Two Grafana dashboards are installed under /etc/fivem-ebpf/grafana.
 
 ## License

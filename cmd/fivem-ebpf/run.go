@@ -148,6 +148,7 @@ func runDaemon(args []string) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
+	mux.HandleFunc("GET /health", handleHealthz(l))
 	registerAPI(mux, apiCfg{
 		Loaded:  l,
 		Version: version,
@@ -173,7 +174,7 @@ func runDaemon(args []string) error {
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("fivem-ebpf " + version + "\n  /metrics\n  " +
+		_, _ = w.Write([]byte("fivem-ebpf " + version + "\n  /metrics\n  /health\n  " +
 			strings.Join(apiRoutes, "\n  ") + "\n"))
 	})
 

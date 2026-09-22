@@ -410,6 +410,18 @@ func handleInfo(cfg apiCfg) http.HandlerFunc {
 	}
 }
 
+func handleHealthz(l *loader.Loaded) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if l.XDPLink == nil || l.SockopsLink == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("degraded"))
+			return
+		}
+		_, _ = w.Write([]byte("up"))
+	}
+}
+
 func handleStats(l *loader.Loaded) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		counters, err := readCounters(l)
