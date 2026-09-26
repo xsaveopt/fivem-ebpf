@@ -151,7 +151,7 @@ static __always_inline void health_record_anomaly(__be32 src_ip) {
         struct udp_health init = {
             .anomalies          = 1,
             .window_start_ns    = now,
-            .blacklist_until_ns = 0,
+            .blacklist_until_ns = health_threshold <= 1 ? now + health_blacklist_ns : 0,
         };
         bpf_map_update_elem(&udp_health, &src_ip, &init, BPF_NOEXIST);
         return;
