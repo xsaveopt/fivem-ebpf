@@ -44,7 +44,7 @@ esac
 
 pin_dir() {
   if [ -r "$ETC_DIR/config" ]; then
-    configured=$(sed -n 's/^[[:space:]]*PIN_PATH=//p' "$ETC_DIR/config" | tail -n1 | sed 's/[[:space:]]*$//; s/^"//; s/"$//')
+    configured=$(sed -n 's/^[[:space:]]*PIN_PATH=//p' "$ETC_DIR/config" | tail -n1 | sed "s/[[:space:]]*\$//; s/^[\"']//; s/[\"']\$//")
     if [ -n "${configured:-}" ]; then
       echo "$configured"
       return
@@ -157,7 +157,10 @@ else
     case "$key" in
       ''|\#*) continue ;;
     esac
-    if ! $SUDO grep -q "^${key}=" "$ETC_DIR/config"; then
+    if ! $SUDO grep -q "^[[:space:]]*${key}=" "$ETC_DIR/config"; then
+      if [ -n "$($SUDO tail -c1 "$ETC_DIR/config")" ]; then
+        echo | $SUDO tee -a "$ETC_DIR/config" >/dev/null
+      fi
       printf "%s=%s\n" "$key" "$val" | $SUDO tee -a "$ETC_DIR/config" >/dev/null
       ADDED="$ADDED $key"
     fi
