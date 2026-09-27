@@ -145,12 +145,16 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            dist/fivem-ebpf-*-linux-*.zip
-            dist/fivem-ebpf-*-linux-*.zip.sha256
-          body: ${{ steps.vtsum.outputs.results }}
-          fail_on_unmatched_files: true
-          draft: false
-          generate_release_notes: true
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.vtsum.outputs.results }}
+        run: |
+          shopt -s failglob
+          files=(dist/fivem-ebpf-*-linux-*.zip dist/fivem-ebpf-*-linux-*.zip.sha256)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            [ -z "$BODY" ] || gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes "$BODY"
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "$BODY" --generate-notes
+          fi
